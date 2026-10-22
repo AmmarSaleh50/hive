@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  A live board for every Claude Code session on your machine: where each one stands, what it needs from you, and everything it said, without the tool calls.
+  A live board for every Claude Code session on your machine: where each one stands, what it needs from you, and a short briefing of what it did.
 </p>
 
 <p align="center">
@@ -42,10 +42,6 @@ Hive is one page that answers that at a glance.
 **A briefing instead of a wall of text.** One headline, the numbers that matter (before → after), a few tagged facts and one box that says what's next or what's your move.
 
 <p align="center"><img src="docs/screenshots/briefing.png" alt="A briefing: headline, numbers, facts, next step" width="560" /></p>
-
-**Everything they said, and nothing else.** The timeline shows what each session said to you, grouped by what you asked. Short "now doing X" lines stay on one line, results show in full, questions and plans the session put to you are included. No tool calls.
-
-<p align="center"><img src="docs/screenshots/timeline.png" alt="The timeline: what each session said" width="860" /></p>
 
 **On your phone too.** Hive works as a home-screen app, privately over [Tailscale](https://tailscale.com).
 

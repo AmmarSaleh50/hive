@@ -32,8 +32,9 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
       'sessions are grouped as needs you, working and finished');
 
     const one = JSON.parse((await get('/api/session/demo-auth')).body);
-    check(one.session.progress.steps.length > 0 && one.msgs.length > 0 && one.session.progress.brief, 'a session has steps, messages and a briefing');
-    check((await get('/api/feed')).status === 200, 'timeline feed answers');
+    check(one.session.progress.steps.length > 0 && one.session.progress.brief && one.session.progress.history.length > 0,
+      'a session has steps, a briefing and earlier jobs');
+    check(!('msgs' in one), 'the page is not sent the raw messages');
     check((await get('/api/session/nope')).status === 404, 'unknown session is 404');
 
     check((await get('/', 'evil.example')).status === 403, 'other host names are refused');

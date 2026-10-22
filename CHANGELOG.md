@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0 (2026-10-22)
+
+### Removed
+
+- **Timeline.** The Timeline tab and the message list on each session page are gone. Hive is about where each session stands at a glance, and the steps and briefing already cover that. Hive still reads the messages, because Haiku needs them to write the progress.
+
 ## 0.1.0 (2026-10-22)
 
 First public release.

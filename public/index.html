@@ -18,9 +18,9 @@
 <!-- Icons for steps, jobs, facts and numbers; Haiku picks names from a list checked against this exact version. -->
 <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
 <style>
-/* Layout: one row per session, grouped "Needs you" then "Working". Progress is a strip of honeycomb
-   cells, one per step. Messages are a timeline grouped by what you asked: short "doing X" lines stay one
-   line, real results show in full. Black and white; honey marks what needs you; each session has its own colour. */
+/* Layout: one row per session, grouped Needs you, Working, Finished. Progress is a strip of honeycomb
+   cells, one per step; a session's page shows its steps, a briefing and its earlier jobs.
+   Black and white; honey marks progress and what needs you; each session has its own colour. */
 :root {
   --bg: #050506; --row: #0c0d10; --edge: #1e2026; --wax: #24262d; --fg: #fff; --honey: #f5b700; --red: #ff5d5d; --sky: #7cc4ff;
   --body: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -145,28 +145,6 @@ nav button.on { border-color: var(--fg); }
 .earlier b { font: 500 13px var(--mono); justify-self: end; font-variant-numeric: tabular-nums; }
 h2 { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; margin: 22px 0 0; }
 
-/* Timeline */
-.timeline { display: flex; flex-direction: column; gap: 34px; }
-.turn { display: flex; flex-direction: column; }
-.ask { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 0 14px; margin-bottom: 10px; }
-.ask .t, .item .t { font: 500 12px/24px var(--mono); }
-.ask .from { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--honey); line-height: 24px; display: flex; align-items: center; gap: 8px; }
-.ask .text { grid-column: 2; font-size: 16px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-.ask .text.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
-.item { display: grid; grid-template-columns: 50px 14px minmax(0, 1fr); gap: 0 14px; position: relative; }
-.item::before { content: ""; position: absolute; left: 70px; top: 0; bottom: 0; width: 1px; background: var(--edge); }
-.item:first-of-type::before { top: 12px; }
-.item:last-child::before { bottom: calc(100% - 12px); }
-.item .node { position: relative; z-index: 1; display: flex; justify-content: center; padding-top: 6px; }
-.item .node .cell { width: 12px; height: 11px; }
-.item .node .cell.result { background: var(--fg); }
-.item .line { font-size: 14px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding-bottom: 2px; }
-.item .line.open { white-space: normal; overflow: visible; text-overflow: clip; font-size: 15px; line-height: 1.5; padding: 1px 0 12px; }
-.item .block { font-size: 15px; padding: 2px 0 14px; min-width: 0; }
-.item .block.clamp { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); cursor: pointer; }
-.item .block.result { font-size: 16px; }
-.rlabel { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; line-height: 24px; }
-.sess { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
 
 /* Summary pop-up */
 .sumbtn { font-size: 13px; font-weight: 600; border: 1px solid var(--edge); border-radius: 999px; padding: 3px 13px; text-align: center; }
@@ -252,17 +230,6 @@ dialog::backdrop { background: rgba(0, 0, 0, .72); }
 .stim-pick .hint { font-size: 12px; }
 nav button.stimbtn.on { border-color: var(--honey); }
 
-.body { min-width: 0; overflow-wrap: anywhere; }
-.body p { margin: 0 0 .6em; } .body > :last-child { margin-bottom: 0; }
-.body h4 { margin: .8em 0 .3em; font-size: 15px; }
-.body ul, .body ol { margin: 0 0 .6em; padding-left: 1.3em; }
-.body li { margin: .15em 0; }
-.body code { font: 13px var(--mono); background: var(--wax); border-radius: 4px; padding: 1px 5px; }
-.body pre { background: var(--row); border: 1px solid var(--edge); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0 0 .6em; }
-.body pre code { background: none; padding: 0; }
-.body .tw { overflow-x: auto; margin: 0 0 .6em; }
-.body table { border-collapse: collapse; font-size: 14px; }
-.body th, .body td { border: 1px solid var(--edge); padding: 4px 10px; text-align: left; vertical-align: top; }
 
 @media (max-width: 720px) {
   .row { grid-template-columns: minmax(0, 1fr) auto; padding: 14px 16px; }
@@ -270,9 +237,6 @@ nav button.stimbtn.on { border-color: var(--honey); }
   .row .pct { font-size: 24px; }
   .view .pct { font-size: 60px; }
   .view .comb .cell { width: 22px; height: 19px; }
-  .ask, .item { grid-template-columns: 42px minmax(0, 1fr); }
-  .item { grid-template-columns: 42px 12px minmax(0, 1fr); gap: 0 10px; }
-  .item::before { left: 57px; }
 }
 
 /* ---- Phones ---- */
@@ -326,7 +290,6 @@ nav button.stimbtn.on { border-color: var(--honey); }
   .fact { grid-template-columns: 26px 64px minmax(0, 1fr); gap: 10px; font-size: 15px; }
   .earlier { column-gap: 12px; }
   .nextbox p { font-size: 16px; }
-  .ask .text { font-size: 15px; }
 }
 @keyframes sheet { from { transform: translateY(40px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { dialog[open] { animation: none; } }
@@ -337,8 +300,7 @@ nav button.stimbtn.on { border-color: var(--honey); }
   <header>
     <button class="brand" type="button" data-go=""><img src="/logo.svg" alt=""><span>hive</span><em class="demo-tag" id="demo-tag" hidden>demo</em></button>
     <nav>
-      <button id="tab-board" type="button" data-go="">Progress</button>
-      <button id="tab-feed" type="button" data-go="feed">Timeline</button>
+      <button id="tab-board" class="on" type="button" data-go="">Progress</button>
       <button id="tab-stim" class="stimbtn" type="button" aria-label="Stimulation"><span class="navlabel">Stimulation</span><svg class="navicon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg></button>
     </nav>
   </header>
@@ -362,64 +324,13 @@ nav button.stimbtn.on { border-color: var(--honey); }
 </div>
 <dialog id="sum" aria-labelledby="sum-goal">
   <div class="dhead"><div><div class="name" id="sum-name"></div><div class="goal" id="sum-goal"></div></div><button class="dclose" type="button" data-close>Close</button></div>
-  <div class="dbody body" id="sum-body" tabindex="-1" autofocus></div>
+  <div class="dbody" id="sum-body" tabindex="-1" autofocus></div>
 </dialog>
 <script>
 const app = document.getElementById('app');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Small markdown renderer for agent messages: fences, inline code, bold, italic, links, headings, lists, tables.
-function md(src) {
-  const fences = [];
-  src = src.replace(/```[^\n]*\n([\s\S]*?)```/g, (m, code) => {
-    fences.push('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>');
-    return '\n\u0000' + (fences.length - 1) + '\u0000\n';
-  });
-  const out = [];
-  let para = [], list = null, table = null;
-  const flushPara = () => { if (para.length) out.push('<p>' + para.map(inline).join('<br>') + '</p>'); para = []; };
-  const flushList = () => { if (list) out.push(`<${list.tag}>` + list.items.join('') + `</${list.tag}>`); list = null; };
-  const flushTable = () => {
-    if (!table) return;
-    const rows = table.filter(r => !/^\|?\s*:?-{2,}/.test(r)).map(r => r.replace(/^\||\|$/g, '').split('|').map(c => inline(c.trim())));
-    out.push('<div class="tw"><table>' + rows.map((r, i) => '<tr>' + r.map(c => i ? `<td>${c}</td>` : `<th>${c}</th>`).join('') + '</tr>').join('') + '</table></div>');
-    table = null;
-  };
-  const flush = () => { flushPara(); flushList(); flushTable(); };
-  for (const raw of src.split('\n')) {
-    const line = raw.replace(/\s+$/, '');
-    let m;
-    if ((m = line.match(/^\u0000(\d+)\u0000$/))) { flush(); out.push(fences[m[1]]); continue; }
-    if (!line.trim()) { flush(); continue; }
-    if (line.trim().startsWith('|')) { flushPara(); flushList(); (table = table || []).push(line.trim()); continue; }
-    flushTable();
-    if ((m = line.match(/^#{1,6}\s+(.*)/))) { flush(); out.push('<h4>' + inline(m[1]) + '</h4>'); continue; }
-    if ((m = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)/))) {
-      flushPara();
-      const tag = /\d/.test(m[2]) ? 'ol' : 'ul';
-      if (!list) list = { tag, items: [] };
-      const depth = Math.floor(m[1].length / 2);
-      list.items.push(`<li${depth ? ` style="margin-left:${depth * 1.2}em"` : ''}>${inline(m[3])}</li>`);
-      continue;
-    }
-    if (list && /^\s{2,}/.test(raw)) { list.items[list.items.length - 1] = list.items[list.items.length - 1].replace(/<\/li>$/, '<br>' + inline(line.trim()) + '</li>'); continue; }
-    flushList();
-    para.push(line);
-  }
-  flush();
-  return out.join('');
-}
-function inline(s) {
-  const codes = [];
-  s = esc(s).replace(/`([^`]+)`/g, (m, c) => { codes.push('<code>' + c + '</code>'); return '\u0001' + (codes.length - 1) + '\u0001'; });
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<em>$2</em>')
-    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  return s.replace(/\u0001(\d+)\u0001/g, (m, i) => codes[i]);
-}
-const plain = t => t.replace(/```[\s\S]*?```/g, ' ').replace(/[*`#>|]/g, '').replace(/\s+/g, ' ').trim();
-
-// Every session gets its own colour, so you can tell them apart in the timeline.
+// Every session gets its own colour, so you can tell them apart at a glance.
 const HUES = ['#7cc4ff', '#ff8fab', '#a3e36b', '#b9a3ff', '#5fe0cf', '#ffb283', '#e6e08e'];
 function hue(id) { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return HUES[h % HUES.length]; }
 const tag = id => `<i class="cell tag" style="background:${hue(id)}"></i>`;
@@ -518,60 +429,6 @@ function renderBoard(d) {
   return h;
 }
 
-// ---- Timeline: blocks that start with what you asked; short updates stay one line ----
-const open = new Set(); // messages you expanded
-const key = m => (m.sid || '') + m.at + m.text.length;
-const isShort = t => t.length < 220 && !/\n\s*([-*|]|\d+\.)/.test(t);
-
-function turns(msgs) {
-  const out = [];
-  let cur = null;
-  for (const m of msgs) {
-    if (m.role === 'you') {
-      // Prompts sent back to back belong together; a resent, longer version replaces the first.
-      if (cur && cur.asks.length && !cur.items.length) {
-        const last = cur.asks[cur.asks.length - 1];
-        if (!m.kind && !last.kind && m.text.startsWith(last.text)) cur.asks[cur.asks.length - 1] = m; else cur.asks.push(m);
-        continue;
-      }
-      cur = { asks: [m], items: [] }; out.push(cur); continue;
-    }
-    if (!cur) { cur = { asks: [], items: [] }; out.push(cur); }
-    cur.items.push(m);
-  }
-  return out;
-}
-
-function itemHtml(m, isResult) {
-  if (/^\*\*(Question|Plan for your approval)/.test(m.text)) isResult = false;
-  const k = esc(key(m)), expanded = open.has(key(m));
-  if (isShort(m.text) && !isResult) {
-    return `<div class="item"><span class="t">${clock(m.at)}</span><span class="node"><i class="cell"></i></span>
-      <div class="line${expanded ? ' open body' : ''}" data-open="${k}"${expanded ? '' : ` title="${esc(plain(m.text))}"`}>${expanded ? md(m.text) : esc(plain(m.text))}</div></div>`;
-  }
-  const clamp = !isResult && !expanded && m.text.length > 600;
-  return `<div class="item"><span class="t">${clock(m.at)}</span><span class="node"><i class="cell${isResult ? ' result' : ''}"></i></span>
-    <div class="block body${isResult ? ' result' : ''}${clamp ? ' clamp' : ''}"${clamp ? ` data-open="${k}"` : ''}>${isResult ? '<div class="rlabel">Result</div>' : ''}${md(m.text)}</div></div>`;
-}
-
-function turnHtml(t) {
-  const h = t.asks.map(a => {
-    const k = key(a), long = a.text.length > 240 && !open.has(k);
-    return `<div class="ask"><span class="t">${clock(a.at)}</span><span class="from">${a.kind === 'answer' ? 'You answered' : 'You asked'}</span>
-      <div class="text${long ? ' clamp' : ''}"${long ? ` data-open="${esc(k)}"` : ''}>${esc(a.text).replace(/\n/g, '<br>')}</div></div>`;
-  }).join('');
-  return `<div class="turn">${h}${t.items.map(m => itemHtml(m, !!m.final)).join('')}</div>`;
-}
-
-let limit = 6;
-function timeline(msgs) {
-  const ts = turns(msgs);
-  const shown = ts.slice(-limit).reverse();
-  const html = shown.map(turnHtml).join('');
-  return `<div class="timeline">${html || '<div>No messages yet</div>'}</div>` +
-    (ts.length > limit ? `<button class="more" type="button" data-earlier style="margin-top:24px">Show earlier</button>` : '');
-}
-
 function renderSession(d) {
   const s = d.session, p = s.progress, cls = s.state === 'waiting' ? 'needs' : s.state;
   const status = cls === 'needs' ? `Needs you for ${span(s.stateSince)}` : cls === 'working' ? `Working for ${span(s.stateSince)}`
@@ -587,30 +444,12 @@ function renderSession(d) {
       <ul class="steps">${p.steps.map(x => `<li class="${esc(x.s)}">${hex(x.i, x.s)}<span>${esc(x.t)}</span></li>`).join('')}</ul>`
       : '<div class="nowline">Reading this session</div>'}
     ${hist}
-    <h2>Timeline</h2>
-    ${timeline(d.msgs)}
   </div>`;
-}
-
-// All sessions: consecutive messages from one session form one block, newest block first.
-function renderFeed(d) {
-  const blocks = [];
-  for (const m of d.msgs) {
-    const b = blocks[blocks.length - 1];
-    if (b && b.sid === m.sid) b.msgs.push(m); else blocks.push({ sid: m.sid, name: m.name, msgs: [m] });
-  }
-  const shown = blocks.slice(-limit * 3).reverse();
-  const html = shown.map(b => `<div class="turn"><button class="sess" type="button" data-id="${esc(b.sid)}">${tag(b.sid)}${esc(b.name)}</button>
-      ${turns(b.msgs).map(turnHtml).join('')}</div>`).join('');
-  return `<div class="view"><div class="timeline">${html || '<div>Nothing said yet</div>'}</div>` +
-    (blocks.length > limit * 3 ? `<button class="more" type="button" data-earlier style="margin-top:24px">Show earlier</button>` : '') + '</div>';
 }
 
 async function load() {
   const r = location.hash.slice(1);
-  if (r !== route) { route = r; limit = 6; window.scrollTo(0, 0); }
-  document.getElementById('tab-board').classList.toggle('on', r !== 'feed');
-  document.getElementById('tab-feed').classList.toggle('on', r === 'feed');
+  if (r !== route) { route = r; window.scrollTo(0, 0); }
   const state = await (await fetch('/api/state')).json();
   lastState = state;
   document.getElementById('demo-tag').hidden = !state.demo;
@@ -622,8 +461,6 @@ async function load() {
   if (r.startsWith('s/')) {
     const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)));
     app.innerHTML = res.ok ? renderSession(await res.json()) : '<div class="view"><button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button><div class="nowline">That session has left the hive.</div></div>';
-  } else if (r === 'feed') {
-    app.innerHTML = renderFeed(await (await fetch('/api/feed')).json());
   } else {
     app.innerHTML = renderBoard(state);
   }
@@ -661,11 +498,8 @@ document.addEventListener('click', e => {
     try { localStorage.setItem('hive.closed', showClosed ? '1' : '0'); } catch {}
     return refresh();
   }
-  if (e.target.closest('[data-earlier]')) { limit += 6; return refresh(); }
   const sb = e.target.closest('[data-summary]');
   if (sb) return openSummary(sb.dataset.summary, sb.dataset.hist !== undefined ? +sb.dataset.hist : undefined);
-  const o = e.target.closest('[data-open]');
-  if (o) { const k = o.dataset.open; open.has(k) ? open.delete(k) : open.add(k); return refresh(); }
   const go = e.target.closest('[data-go]');
   if (go) { location.hash = go.dataset.go; return; }
   const t = e.target.closest('[data-id]');

@@ -1,7 +1,7 @@
 {
   "name": "hive-board",
-  "version": "0.1.0",
-  "description": "A live board for every Claude Code session on your machine: progress, briefings and what each one said, without the tool calls.",
+  "version": "0.2.0",
+  "description": "A live board for every Claude Code session on your machine: where each one stands, what it needs from you, and a briefing of what it did.",
   "license": "MIT",
   "author": "Ammar Saleh",
   "homepage": "https://github.com/AmmarSaleh50/hive#readme",

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Hive: one page showing every Claude Code session on this machine, its progress
-// and everything it has said to you, without the tool calls.
+// Hive: one page showing every Claude Code session on this machine, where it stands and what it needs from you.
 // Reads ~/.claude only (never writes there). Serves the board to this machine only (loopback).
 // Each session's progress (goal, steps, what it's doing now, a briefing) is written by Haiku from its messages.
 // No dependencies: Node 18+ and the `claude` CLI.
@@ -484,18 +483,6 @@ function summary(s) {
     startedAt: s.startedAt, endedAt: s.endedAt, lastAt: s.lastAt, stateSince: s.stateSince || s.lastAt, progress, tasks: tasks || [], last };
 }
 
-// A message is a turn's result when it's Claude's last word before your next prompt, or before the
-// session stopped working.
-function withFinal(s) {
-  const working = summary(s).state === 'working';
-  return s.msgs.map((m, i) => {
-    if (m.role !== 'agent') return m;
-    const next = s.msgs[i + 1];
-    const final = next ? next.role === 'you' && next.kind !== 'answer' : !working;
-    return final ? { ...m, final } : m;
-  });
-}
-
 function tick() {
   let changed = scanRegistry();
   for (const s of sessions.values()) {
@@ -596,16 +583,7 @@ function handle(req, res) {
   if (u.pathname.startsWith('/api/session/')) {
     const s = sessions.get(decodeURIComponent(u.pathname.slice(13)));
     if (!s) { res.writeHead(404); return res.end(); }
-    return json(res, { version, session: summary(s), msgs: withFinal(s) });
-  }
-  if (u.pathname === '/api/feed') {
-    const all = [];
-    for (const s of sessions.values()) {
-      const name = displayName(s);
-      for (const m of withFinal(s)) all.push({ ...m, sid: s.id, name });
-    }
-    all.sort((a, b) => a.at - b.at);
-    return json(res, { version, msgs: all.slice(-400) });
+    return json(res, { version, session: summary(s) });
   }
   if (u.pathname === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });

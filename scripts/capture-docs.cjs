@@ -31,8 +31,6 @@ const still = p => p.addStyleTag({ content: '*{animation:none!important;transiti
   await p.click('.vtitle .sumbtn'); await p.waitForTimeout(1200); await still(p);
   await (await p.$('dialog')).screenshot({ path: path.join(out, 'briefing.png') });
   await p.keyboard.press('Escape');
-  await p.goto(base + '/#feed'); await p.waitForTimeout(1500); await still(p);
-  await p.screenshot({ path: path.join(out, 'timeline.png') });
   await p.close();
 
   // The Stimulation player over the board, one shot per built-in channel.

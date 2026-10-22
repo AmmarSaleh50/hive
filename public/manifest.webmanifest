@@ -1,7 +1,7 @@
 {
   "name": "Hive",
   "short_name": "Hive",
-  "description": "Every Claude Code session: progress, summaries and what each one said.",
+  "description": "Every Claude Code session: where each one stands and what it needs from you.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#050506",

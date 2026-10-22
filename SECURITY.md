@@ -21,7 +21,7 @@ Anything that breaks one of these is in scope, for example:
 
 - Reading transcripts from another origin or another machine without Tailscale.
 - Getting Hive to serve files outside `public/` or the configured clip folders.
-- Script injection through session names, messages or summaries rendered in the page.
+- Script injection through session names or summaries rendered in the page.
 
 ## Out of scope
 
