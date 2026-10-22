@@ -79,7 +79,7 @@ function session(id) {
   let s = sessions.get(id);
   if (!s) {
     s = { id, name: '', title: '', cwd: '', pid: 0, kind: '', status: '', startedAt: 0, running: false,
-      endedAt: 0, file: null, offset: 0, rest: null, msgs: [], todos: null, tasks: null, tasksSig: '', lastAt: 0,
+      endedAt: 0, file: null, offset: 0, rest: null, msgs: [], parents: new Map(), leaf: null, todos: null, tasks: null, tasksSig: '', lastAt: 0,
       prog: cache[id] || null, dirty: false, summarizing: false, lastRun: 0 };
     sessions.set(id, s);
   }
@@ -139,6 +139,11 @@ function ingest(s, line) {
   if (line.length > 4e6) return;
   let o;
   try { o = JSON.parse(line); } catch { return; }
+  // A transcript is a tree: rewinding, or pressing Esc and editing a prompt, starts a new branch from an earlier
+  // entry. Like Claude Code, Hive shows only the branch that ends at the newest entry (or at the end point
+  // Claude Code records after a rewind).
+  if (o.type === 'last-prompt' && o.leafUuid) { if (s.parents.has(o.leafUuid)) s.leaf = o.leafUuid; return; }
+  if (o.uuid && !o.isSidechain && s.parents.size < 500000) { s.parents.set(o.uuid, o.parentUuid || o.logicalParentUuid || null); s.leaf = o.uuid; }
   if (o.type === 'custom-title' && o.customTitle) { s.title = o.customTitle; return; }
   if (!o.cwd || o.isSidechain) { if (o.cwd && !s.cwd) s.cwd = o.cwd; return; }
   if (!s.cwd) s.cwd = o.cwd;
@@ -149,7 +154,7 @@ function ingest(s, line) {
   if (o.type === 'assistant') {
     if (!Array.isArray(c)) return;
     const t = c.filter(b => b.type === 'text').map(b => b.text).join('\n\n').trim();
-    if (t) push(s, { role: 'agent', text: t, at });
+    if (t) push(s, { role: 'agent', text: t, at, uuid: o.uuid });
     for (const b of c) {
       if (b.type !== 'tool_use') continue;
       s.pending = { id: b.id, name: b.name };
@@ -158,9 +163,9 @@ function ingest(s, line) {
         s.todos = inp.todos.map((t, i) => ({ id: String(i + 1), subject: t.content, activeForm: t.activeForm, status: t.status }));
       // Questions and plans are addressed to you, so they belong in the messages.
       if (b.name === 'AskUserQuestion' && Array.isArray(inp.questions))
-        push(s, { role: 'agent', at, text: inp.questions.map(q => `**Question:** ${q.question}\n` +
+        push(s, { role: 'agent', at, uuid: o.uuid, text: inp.questions.map(q => `**Question:** ${q.question}\n` +
           (q.options || []).map(o => `- ${o.label}${o.description ? `: ${o.description}` : ''}`).join('\n')).join('\n\n') });
-      if (b.name === 'ExitPlanMode' && inp.plan) push(s, { role: 'agent', at, text: `**Plan for your approval:**\n\n${inp.plan}` });
+      if (b.name === 'ExitPlanMode' && inp.plan) push(s, { role: 'agent', at, uuid: o.uuid, text: `**Plan for your approval:**\n\n${inp.plan}` });
     }
     return;
   }
@@ -170,7 +175,7 @@ function ingest(s, line) {
       const a = typeof answer.content === 'string' ? answer.content : (answer.content || []).map(x => x.text || '').join('\n');
       const picks = [...a.matchAll(/"(?:[^"\\]|\\.)*"="((?:[^"\\]|\\.)*)"/g)].map(x => x[1]);
       const text = picks.length ? picks.join('\n') : a.trim();
-      if (text) push(s, { role: 'you', kind: 'answer', at, text });
+      if (text) push(s, { role: 'you', kind: 'answer', at, uuid: o.uuid, text });
     }
     s.pending = null;
   }
@@ -178,16 +183,27 @@ function ingest(s, line) {
   let t = typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b.type === 'text').map(b => b.text).join('\n\n') : '';
   t = t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
   if (!t || SKIP_USER.test(t) || t.startsWith('[Request interrupted')) return;
-  const prev = s.msgs[s.msgs.length - 1];
-  if (prev && prev.role === 'you' && !prev.kind && prev.text === t) return; // Claude Code logs some prompts twice
-  push(s, { role: 'you', text: t, at });
+  push(s, { role: 'you', text: t, at, uuid: o.uuid });
+}
+
+// The messages on the branch you're on: walk back from the end point through each entry's parent.
+function active(s) {
+  if (!s.leaf || !s.parents.has(s.leaf)) return s.msgs;
+  const key = s.leaf + ':' + s.msgs.length + ':' + (s.msgs.length && s.msgs[s.msgs.length - 1].at);
+  if (s.activeKey !== key) {
+    const on = new Set();
+    for (let u = s.leaf; u && s.parents.has(u) && !on.has(u);) { on.add(u); u = s.parents.get(u); }
+    s.activeMsgs = s.msgs.filter(m => !m.uuid || on.has(m.uuid));
+    s.activeKey = key;
+  }
+  return s.activeMsgs;
 }
 
 function readNew(s) {
   if (!s.file) return false;
   let st;
   try { st = fs.statSync(s.file); } catch { return false; }
-  if (st.size < s.offset) { s.offset = 0; s.rest = null; s.msgs = []; }
+  if (st.size < s.offset) { s.offset = 0; s.rest = null; s.msgs = []; s.parents = new Map(); s.leaf = null; }
   if (st.size === s.offset) return false;
   let start = s.offset, partial = false;
   if (start === 0 && st.size > TAIL) { start = st.size - TAIL; partial = true; }
@@ -228,7 +244,7 @@ function readTasks(s) {
 function displayName(s) {
   if (s.name) return s.name;
   if (s.title) return s.title;
-  const first = s.msgs.find(m => m.role === 'you');
+  const first = active(s).find(m => m.role === 'you');
   if (first) return first.text.replace(/\s+/g, ' ').slice(0, 48);
   return s.id.slice(0, 8);
 }
@@ -346,11 +362,11 @@ function cleanBrief(b) {
 
 // Newest messages in full, older ones shortened, the user's requests always kept: reaches far back cheaply.
 function transcriptText(s) {
-  const parts = [];
+  const parts = [], msgs = active(s);
   let used = 0;
-  for (let i = s.msgs.length - 1; i >= 0 && used < SUMMARY_CHARS; i--) {
-    const m = s.msgs[i];
-    const cap = m.role === 'you' ? 1500 : s.msgs.length - i <= 6 ? 3000 : 280;
+  for (let i = msgs.length - 1; i >= 0 && used < SUMMARY_CHARS; i--) {
+    const m = msgs[i];
+    const cap = m.role === 'you' ? 1500 : msgs.length - i <= 6 ? 3000 : 280;
     const t = m.text.length > cap ? m.text.slice(0, cap) + ' [...]' : m.text;
     const line = `${m.role === 'you' ? 'USER' : 'ASSISTANT'} (${new Date(m.at).toISOString().slice(11, 16)}): ${t}`;
     used += line.length;
@@ -407,7 +423,7 @@ function backfill(s, i) {
   if (!h || h.brief || h.filling) return;
   h.filling = true; backfilling++;
   const start = (s.prog.history[i + 1] || {}).at || 0, end = (h.at || Date.now()) + 60e3;
-  const msgs = s.msgs.filter(m => m.at > start && m.at <= end);
+  const msgs = active(s).filter(m => m.at > start && m.at <= end);
   let used = 0;
   const lines = [];
   for (let j = msgs.length - 1; j >= 0 && used < SUMMARY_CHARS; j--) {
@@ -462,7 +478,8 @@ function scheduleSummaries() {
 // Haiku's verdict once it has seen the finished turn; until then, a last message ending in a question.
 function needsYou(s) {
   if (s.prog && (s.prog.at || 0) >= (s.stateSince || 0) && typeof s.prog.ask === 'boolean') return s.prog.ask;
-  for (let i = s.msgs.length - 1; i >= 0; i--) if (s.msgs[i].role === 'agent') return /\?\s*$/.test(s.msgs[i].text.trim());
+  const msgs = active(s);
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'agent') return /\?\s*$/.test(msgs[i].text.trim());
   return false;
 }
 
@@ -476,7 +493,8 @@ function summary(s) {
       total: steps.length, pct: Math.round(100 * done / steps.length), history: s.prog.history || [] };
   }
   let last = null;
-  for (let i = s.msgs.length - 1; i >= 0; i--) if (s.msgs[i].role === 'agent') { last = s.msgs[i]; break; }
+  const msgs = active(s);
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'agent') { last = msgs[i]; break; }
   // Claude Code reports busy, idle (turn finished) or waiting (blocked on a question or permission).
   // Blocked always needs you; a finished turn needs you only if it asked for something.
   const state = !s.running ? 'closed' : s.status === 'waiting' ? 'waiting' : s.status === 'idle' ? (needsYou(s) ? 'waiting' : 'finished') : 'working';
@@ -488,9 +506,10 @@ function summary(s) {
 // session stopped working.
 function withFinal(s) {
   const working = summary(s).state === 'working';
-  return s.msgs.map((m, i) => {
+  const msgs = active(s);
+  return msgs.map((m, i) => {
     if (m.role !== 'agent') return m;
-    const next = s.msgs[i + 1];
+    const next = msgs[i + 1];
     const final = next ? next.role === 'you' && next.kind !== 'answer' : !working;
     return final ? { ...m, final } : m;
   });

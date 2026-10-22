@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.2 (2026-10-22)
+
+### Fixed
+
+- **Rewinds and edited prompts.** A prompt you escaped and edited, or a part of the conversation you rewound, no longer shows up. Like Claude Code, Hive now follows only the branch you are on, both in "What it said" and in what Haiku reads.
+
 ## 0.2.1 (2026-10-22)
 
 ### Fixed
