@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in Hive doesn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. A screenshot helps, but please blur anything private.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Start Hive with npm start
+        2. Open a Claude Code session and ...
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and browser
+      placeholder: Windows 11, Chrome 145
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Node and Claude Code versions
+      description: Output of `node -v` and `claude --version`
+      placeholder: v22.14.0, 2.1.308
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything Hive printed
+      render: text

@@ -1,0 +1,20 @@
+{
+  "name": "hive-board",
+  "version": "0.1.0",
+  "description": "A live board for every Claude Code session on your machine: progress, briefings and what each one said, without the tool calls.",
+  "license": "MIT",
+  "author": "Ammar Saleh",
+  "homepage": "https://github.com/AmmarSaleh50/hive#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/AmmarSaleh50/hive.git" },
+  "bugs": { "url": "https://github.com/AmmarSaleh50/hive/issues" },
+  "keywords": ["claude", "claude-code", "anthropic", "dashboard", "ai-agents", "developer-tools", "self-hosted", "tailscale"],
+  "main": "server.cjs",
+  "bin": { "hive": "server.cjs" },
+  "files": ["server.cjs", "demo.cjs", "public/", "hive.config.example.json", "scripts/"],
+  "scripts": {
+    "start": "node server.cjs",
+    "demo": "node server.cjs --demo",
+    "test": "node scripts/smoke-test.cjs"
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hive</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Hive">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#050506">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500;700&family=Unbounded:wght@600&display=swap">
+<!-- Icons for steps, jobs, facts and numbers; Haiku picks names from a list checked against this exact version. -->
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<style>
+/* Layout: one row per session, grouped "Needs you" then "Working". Progress is a strip of honeycomb
+   cells, one per step. Messages are a timeline grouped by what you asked: short "doing X" lines stay one
+   line, real results show in full. Black and white; honey marks what needs you; each session has its own colour. */
+:root {
+  --bg: #050506; --row: #0c0d10; --edge: #1e2026; --wax: #24262d; --fg: #fff; --honey: #f5b700; --red: #ff5d5d; --sky: #7cc4ff;
+  --body: "Geist", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", "Cascadia Mono", Consolas, monospace;
+  --mark: "Unbounded", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+/* On computers Hive is drawn at 150%, so it reads well without setting Chrome's zoom; phones stay at 100%. */
+@media (hover: hover) and (min-width: 900px) { html { zoom: 1.5; } }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+body { padding: 22px max(16px, env(safe-area-inset-right)) 64px max(16px, env(safe-area-inset-left)); }
+a { color: var(--fg); }
+button { font: inherit; color: var(--fg); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+:focus-visible { outline: 2px solid var(--honey); outline-offset: 3px; border-radius: 6px; }
+
+.wrap { max-width: 1080px; margin: 0 auto; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 34px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand img { width: 28px; height: 28px; }
+.brand span { font: 600 21px/1 var(--mark); letter-spacing: -.01em; }
+.demo-tag { font: 600 11px/1 var(--body); font-style: normal; letter-spacing: .12em; text-transform: uppercase; color: var(--honey);
+  border: 1px solid var(--honey); border-radius: 999px; padding: 4px 8px; margin-left: 4px; }
+.demo-tag[hidden] { display: none; }
+nav { margin-left: auto; display: flex; gap: 22px; font-weight: 500; }
+nav button { padding: 4px 0; border-bottom: 2px solid transparent; }
+nav button.on { border-color: var(--fg); }
+
+.group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 30px; }
+.label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.label.needs { color: var(--honey); }
+.label.working::before { animation: breathe 1.6s ease-in-out infinite; }
+.label.closed::before { background: none; border: 1.5px solid currentColor; }
+
+/* Icons live inside honeycomb cells: the cell says the state (honey done or now, dark still to do),
+   the icon inside says what the line is about. One straight column, whatever the text length. */
+.li { width: 1.1em; height: 1.1em; flex: none; stroke-width: 2; }
+/* Sizes leave whole-pixel margins around the icon (26-14 = 12, 22-14 = 8), so it sits exactly in the middle. */
+.hx { position: relative; display: inline-grid; place-items: center; flex: none; width: 26px; height: 22px; color: var(--fg); }
+.hxs { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.hxs polygon { fill: var(--wax); }
+.hx .li { display: block; width: 14px; height: 14px; stroke-width: 2.2; position: relative; }
+/* Bright cells on black look bigger than dark ones, so a to-do cell gets a light rim drawn on its outline:
+   half of it lies outside, which makes the cell a touch larger around the exact same centre. */
+.hx.todo .hxs polygon { stroke: #6b7080; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.hx.done, .hx.now, .hx.found, .hx.problem, .hx.decided { color: #000; }
+.hx.done .hxs polygon, .hx.now .hxs polygon { fill: var(--honey); }
+.hx.found .hxs polygon { fill: var(--fg); } .hx.problem .hxs polygon { fill: var(--red); } .hx.decided .hxs polygon { fill: var(--sky); }
+.hx.now { animation: breathe 1.6s ease-in-out infinite; }
+.needs .hx.now, .finished .hx.now { animation: none; }
+.hx.sm { width: 22px; height: 20px; } .hx.sm .li { width: 12px; height: 12px; }
+/* A line links the cells down the list, honey while the chain is done, dark from the current step on. */
+.steps li { position: relative; align-items: flex-start; }
+.steps li > span { line-height: 22px; }
+/* Links stop 4px short of each cell, and are honey only between two done steps or into the current one. */
+.steps li:not(:last-child)::after { content: ""; position: absolute; left: 12px; top: 26px; bottom: -14px; width: 2px; border-radius: 1px; background: #3a3e48; }
+.steps li.done:has(+ li.done)::after, .steps li.done:has(+ li.now)::after { background: var(--honey); }
+.earlier .node { display: flex; align-items: center; }
+.goal { display: flex; align-items: center; gap: 8px; }
+.cell { display: inline-block; width: 15px; height: 13px; flex: none; background: var(--wax); clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.cell.done { background: var(--honey); }
+.cell.now { background: var(--honey); animation: breathe 1.6s ease-in-out infinite; }
+.needs .cell.now, .finished .cell.now { animation: none; opacity: .45; }
+.tag { width: 11px; height: 10px; }
+
+.row { display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr) auto; gap: 6px 28px; align-items: center;
+  background: var(--row); border: 1px solid var(--edge); border-radius: 14px; padding: 16px 20px; cursor: pointer; transition: border-color .2s; }
+.row:hover { border-color: var(--fg); }
+.row.needs { border-color: var(--honey); }
+.row.fresh { animation: fresh 1.4s ease-out; }
+.who { min-width: 0; }
+.name { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 600; min-width: 0; }
+.name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; }
+.needs .meta .since { color: var(--honey); }
+.what { min-width: 0; }
+.goal { font-size: 14px; font-weight: 500; }
+.nowline { font-size: 17px; font-weight: 600; line-height: 1.35; text-wrap: balance; }
+.needs .nowline { color: var(--honey); }
+.score { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.pct { font: 700 30px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.comb { display: flex; gap: 3px; }
+
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes fresh { from { border-color: var(--fg); box-shadow: 0 0 0 3px rgba(255,255,255,.12); } }
+@media (prefers-reduced-motion: reduce) { .cell.now, .label.working::before, .row.fresh { animation: none; } }
+
+.quiet { padding: 70px 0; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.quiet img { width: 44px; height: 44px; }
+.quiet b { font-size: 18px; }
+.more { font-weight: 500; border-bottom: 1px solid var(--fg); align-self: flex-start; }
+
+/* Session view */
+.view { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.back { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500;
+  border: 1px solid var(--edge); border-radius: 999px; padding: 6px 16px 6px 12px; }
+.back:hover { border-color: var(--fg); }
+.vtitle { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 6px; }
+.vname { margin: 0; display: flex; align-items: center; gap: 12px; font-size: 30px; font-weight: 700; line-height: 1.1; min-width: 0; }
+.vname span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vname .tag { width: 20px; height: 18px; }
+.status { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 500; margin-top: -10px; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.status.needs { color: var(--honey); }
+.status.working::before { animation: breathe 1.6s ease-in-out infinite; }
+.status.closed::before { background: none; border: 1.5px solid currentColor; }
+.view .goal { font-size: 22px; font-weight: 600; line-height: 1.25; text-wrap: balance; margin-top: 10px; }
+.view .score { flex-direction: row; align-items: center; gap: 28px; flex-wrap: wrap; }
+.view .pct { font-size: 76px; }
+.view .comb { gap: 5px; }
+.view .comb .cell { width: 30px; height: 26px; }
+.view .nowline { font-size: 20px; }
+.view.needs .nowline { color: var(--honey); }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; font-size: 16px; } /* the link lines below assume this gap */
+.steps li { display: flex; gap: 12px; align-items: center; }
+.steps .cell { width: 13px; height: 11px; }
+.steps li.now { font-weight: 600; }
+/* One grid for the whole list, so every count and every button lines up in the same column. */
+.earlier { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto auto; column-gap: 28px; row-gap: 10px; align-items: center; font-size: 15px; }
+.earlier > div { display: contents; }
+.earlier b { font: 500 13px var(--mono); justify-self: end; font-variant-numeric: tabular-nums; }
+h2 { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; margin: 22px 0 0; }
+
+/* Timeline */
+.timeline { display: flex; flex-direction: column; gap: 34px; }
+.turn { display: flex; flex-direction: column; }
+.ask { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 0 14px; margin-bottom: 10px; }
+.ask .t, .item .t { font: 500 12px/24px var(--mono); }
+.ask .from { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--honey); line-height: 24px; display: flex; align-items: center; gap: 8px; }
+.ask .text { grid-column: 2; font-size: 16px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.ask .text.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.item { display: grid; grid-template-columns: 50px 14px minmax(0, 1fr); gap: 0 14px; position: relative; }
+.item::before { content: ""; position: absolute; left: 70px; top: 0; bottom: 0; width: 1px; background: var(--edge); }
+.item:first-of-type::before { top: 12px; }
+.item:last-child::before { bottom: calc(100% - 12px); }
+.item .node { position: relative; z-index: 1; display: flex; justify-content: center; padding-top: 6px; }
+.item .node .cell { width: 12px; height: 11px; }
+.item .node .cell.result { background: var(--fg); }
+.item .line { font-size: 14px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding-bottom: 2px; }
+.item .line.open { white-space: normal; overflow: visible; text-overflow: clip; font-size: 15px; line-height: 1.5; padding: 1px 0 12px; }
+.item .block { font-size: 15px; padding: 2px 0 14px; min-width: 0; }
+.item .block.clamp { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); cursor: pointer; }
+.item .block.result { font-size: 16px; }
+.rlabel { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; line-height: 24px; }
+.sess { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+
+/* Summary pop-up */
+.sumbtn { font-size: 13px; font-weight: 600; border: 1px solid var(--edge); border-radius: 999px; padding: 3px 13px; text-align: center; }
+.sumbtn:hover { border-color: var(--fg); }
+.view .sumbtn { font-size: 14px; padding: 6px 16px; }
+dialog { background: var(--row); color: var(--fg); border: 1px solid var(--edge); border-radius: 16px; padding: 0;
+  width: min(640px, calc(100vw - 32px)); max-height: min(82vh, 780px); }
+dialog[open] { display: flex; flex-direction: column; }
+dialog::backdrop { background: rgba(0, 0, 0, .72); }
+.dhead { display: flex; align-items: flex-start; gap: 16px; padding: 18px 22px 14px; border-bottom: 1px solid var(--edge); }
+.dhead > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.dhead .goal { font-size: 21px; font-weight: 600; line-height: 1.25; text-wrap: balance; }
+.dhead .name { font-size: 14px; }
+.dclose { flex: none; font-weight: 500; }
+.dbody { padding: 18px 22px 24px; overflow-y: auto; font-size: 16px; line-height: 1.6; overscroll-behavior: contain; outline: none; }
+.dbody strong { color: var(--honey); }
+.brief { display: flex; flex-direction: column; gap: 22px; }
+.brief > * { animation: rise .45s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+.headline { font-size: 24px; font-weight: 700; line-height: 1.25; text-wrap: balance; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
+.stat { border: 1px solid var(--edge); border-radius: 12px; padding: 12px 14px; background: var(--bg); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stat b { font: 700 24px/1.15 var(--mono); overflow-wrap: anywhere; }
+.stat span { font-size: 13px; }
+.stat .was { font: 500 12px var(--mono); color: var(--honey); }
+.facts { display: flex; flex-direction: column; gap: 12px; }
+.fact { display: grid; grid-template-columns: 26px 76px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 16px; line-height: 1.4; }
+.slabel { display: flex; align-items: center; gap: 6px; }
+.slabel .li { color: var(--honey); }
+.fact .cell { width: 13px; height: 11px; }
+.fact .k { font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.fact.done .cell { background: var(--honey); }
+.fact.found .cell { background: var(--fg); }
+.fact.problem .cell { background: var(--red); } .fact.problem .k { color: var(--red); }
+.fact.decided .cell { background: var(--sky); }
+.nextbox { border: 1px solid var(--fg); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.nextbox.you { border-color: var(--honey); background: rgba(245, 183, 0, .08); }
+.nextbox .k { font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.nextbox.you .k { color: var(--honey); }
+.nextbox p { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35; }
+@media (prefers-reduced-motion: reduce) { .brief > * { animation: none; } }
+.earlier .sumbtn { flex: none; }
+
+/* Stimulation: pure video. On hover the icon bar appears ABOVE the player, outside the video, so it never
+   covers the player's own buttons. Drag by that bar; resize from any edge or corner. */
+.stim { position: fixed; z-index: 50; background: #000; border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .7), 0 0 0 1px var(--edge); }
+.stim[hidden] { display: none; }
+/* The video sits inside a thin frame; the resize edges live in that frame, never over the video's own controls. */
+.stim-view { position: absolute; inset: 5px; background: #000; border-radius: 8px; overflow: hidden; }
+.stim-view video, .stim-view iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: contain; background: #000; }
+.stim.busy .stim-view { pointer-events: none; }
+.stim-top { position: absolute; z-index: 3; left: 0; right: 0; bottom: calc(100% - 2px); height: 42px; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px; background: var(--row); border: 1px solid var(--edge); border-bottom: 0; border-radius: 12px 12px 0 0;
+  opacity: 0; pointer-events: none; transition: opacity .2s; cursor: grab; touch-action: none; }
+.stim:hover .stim-top, .stim.busy .stim-top, .stim.pick .stim-top { opacity: 1; pointer-events: auto; }
+.vol { width: 96px; flex: none; accent-color: var(--honey); cursor: pointer; }
+.vol[hidden] { display: none; }
+.stim.busy .stim-top { cursor: grabbing; }
+.stim-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; user-select: none; }
+.ico { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; flex: none; }
+.ico:hover { background: rgba(255, 255, 255, .14); }
+.ico svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ico.on { color: var(--honey); }
+.ico[hidden] { display: none; }
+#stim-prev { margin-left: auto; } /* channels left, controls right */
+.grip { position: absolute; z-index: 3; touch-action: none; }
+.grip.n, .grip.s { left: 14px; right: 14px; height: 5px; cursor: ns-resize; }
+.grip.e, .grip.w { top: 14px; bottom: 14px; width: 5px; cursor: ew-resize; }
+.grip.n { z-index: 4; }
+.grip.n { top: 0; } .grip.s { bottom: 0; } .grip.e { right: 0; } .grip.w { left: 0; }
+.grip.ne, .grip.nw, .grip.se, .grip.sw { width: 12px; height: 12px; }
+.grip.ne { top: 0; right: 0; cursor: nesw-resize; } .grip.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.grip.nw { top: 0; left: 0; cursor: nwse-resize; } .grip.se { bottom: 0; right: 0; cursor: nwse-resize; }
+.stim-pick { position: absolute; z-index: 1; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 52px 16px 16px; background: rgba(5, 5, 6, .94); overflow-y: auto; }
+.stim-pick label { font-size: 13px; font-weight: 600; }
+.stim-pick form { display: flex; gap: 8px; }
+.stim-pick input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--fg); background: var(--row); border: 1px solid var(--edge); border-radius: 8px; padding: 7px 10px; }
+.stim-pick a.play { align-self: flex-start; text-decoration: none; }
+.stim-pick button.play, .stim-pick a.play { border: 1px solid var(--fg); border-radius: 999px; padding: 4px 14px; font-weight: 500; font-size: 14px; }
+.stim-pick .saved { display: flex; flex-wrap: wrap; gap: 6px; }
+.stim-pick .saved button { font-size: 13px; border: 1px solid var(--edge); border-radius: 999px; padding: 3px 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stim-pick .saved button.on { border-color: var(--honey); color: var(--honey); }
+.stim-pick .hint { font-size: 12px; }
+nav button.stimbtn.on { border-color: var(--honey); }
+
+.body { min-width: 0; overflow-wrap: anywhere; }
+.body p { margin: 0 0 .6em; } .body > :last-child { margin-bottom: 0; }
+.body h4 { margin: .8em 0 .3em; font-size: 15px; }
+.body ul, .body ol { margin: 0 0 .6em; padding-left: 1.3em; }
+.body li { margin: .15em 0; }
+.body code { font: 13px var(--mono); background: var(--wax); border-radius: 4px; padding: 1px 5px; }
+.body pre { background: var(--row); border: 1px solid var(--edge); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0 0 .6em; }
+.body pre code { background: none; padding: 0; }
+.body .tw { overflow-x: auto; margin: 0 0 .6em; }
+.body table { border-collapse: collapse; font-size: 14px; }
+.body th, .body td { border: 1px solid var(--edge); padding: 4px 10px; text-align: left; vertical-align: top; }
+
+@media (max-width: 720px) {
+  .row { grid-template-columns: minmax(0, 1fr) auto; padding: 14px 16px; }
+  .what { grid-column: 1 / -1; grid-row: 2; }
+  .row .pct { font-size: 24px; }
+  .view .pct { font-size: 60px; }
+  .view .comb .cell { width: 22px; height: 19px; }
+  .ask, .item { grid-template-columns: 42px minmax(0, 1fr); }
+  .item { grid-template-columns: 42px 12px minmax(0, 1fr); gap: 0 10px; }
+  .item::before { left: 57px; }
+}
+
+/* ---- Phones ---- */
+/* Touch screens have no hover: hover borders would stick after a tap, and the player's icons must stay visible. */
+@media (hover: none) {
+  .row:hover, .sumbtn:hover, .back:hover { border-color: var(--edge); }
+  .row.needs:hover { border-color: var(--honey); }
+  /* The icons get their own slim bar above the video, so the video stays clean and the icons stay tappable. */
+  .stim { display: flex; flex-direction: column; }
+  .stim { overflow: hidden; }
+  .vol { display: none; } /* phones set the volume with their own buttons */
+  .stim-top { position: relative; inset: auto; order: -1; flex: none; opacity: 1; pointer-events: auto; height: 42px; background: var(--row);
+    border: 0; border-radius: 0; gap: 2px; padding: 0 4px; }
+  .stim-view { position: relative; inset: auto; flex: 1; min-height: 0; margin: 0 8px 8px; }
+  .ico { width: 36px; height: 36px; }
+  .sumbtn { padding: 7px 15px; font-size: 14px; }
+  /* Resize from the sides and bottom only; the top edge belongs to the icons. */
+  .grip.n, .grip.ne, .grip.nw { display: none; }
+  .grip.s { height: 8px; } .grip.e, .grip.w { width: 8px; top: 42px; }
+  .grip.sw, .grip.se { width: 22px; height: 22px; }
+  .grip.se::after { content: ""; position: absolute; right: 6px; bottom: 6px; width: 10px; height: 10px;
+    border-right: 2px solid rgba(255, 255, 255, .7); border-bottom: 2px solid rgba(255, 255, 255, .7); border-radius: 0 0 3px 0; }
+  .stim-pick input { font-size: 16px; } /* below 16px iPhones zoom in on focus */
+}
+.navlabel { display: inline; }
+.navicon { display: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: -4px; }
+@media (max-width: 600px) {
+  body { padding-top: 14px; }
+  header { margin-bottom: 22px; gap: 10px; }
+  .brand span { font-size: 19px; }
+  nav { gap: 16px; }
+  nav .stimbtn .navlabel { display: none; }
+  .stim-title { display: none; } /* no room next to eight icons */
+  nav .stimbtn .navicon { display: inline-block; }
+  .group { margin-bottom: 24px; }
+  .nowline { font-size: 16px; }
+  .vname { font-size: 25px; }
+  .view { gap: 16px; }
+  .view .goal { font-size: 20px; }
+  .view .nowline { font-size: 18px; }
+  .steps { font-size: 15px; }
+  .earlier { column-gap: 14px; }
+  /* The summary becomes a sheet that slides up from the bottom. */
+  dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 18px 18px 0 0; max-height: 88vh; border-bottom: 0; }
+  dialog[open] { animation: sheet .25s cubic-bezier(.2, .7, .2, 1); }
+  .dbody { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .dhead .goal { font-size: 19px; }
+  .headline { font-size: 21px; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stat b { font-size: 20px; }
+  .fact { grid-template-columns: 26px 64px minmax(0, 1fr); gap: 10px; font-size: 15px; }
+  .earlier { column-gap: 12px; }
+  .nextbox p { font-size: 16px; }
+  .ask .text { font-size: 15px; }
+}
+@keyframes sheet { from { transform: translateY(40px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { dialog[open] { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <button class="brand" type="button" data-go=""><img src="/logo.svg" alt=""><span>hive</span><em class="demo-tag" id="demo-tag" hidden>demo</em></button>
+    <nav>
+      <button id="tab-board" type="button" data-go="">Progress</button>
+      <button id="tab-feed" type="button" data-go="feed">Timeline</button>
+      <button id="tab-stim" class="stimbtn" type="button" aria-label="Stimulation"><span class="navlabel">Stimulation</span><svg class="navicon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg></button>
+    </nav>
+  </header>
+  <main id="app"></main>
+</div>
+<div class="stim" id="stim" hidden>
+  <div class="stim-view" id="stim-view"></div>
+  <div class="stim-top" id="stim-top">
+    <button class="ico" type="button" data-ch="clips" title="My clips" aria-label="My clips"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
+    <button class="ico" type="button" data-ch="subway" title="Subway Surfers" aria-label="Subway Surfers"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M8 21l2-4M16 21l-2-4"/><circle cx="9" cy="14" r=".6"/><circle cx="15" cy="14" r=".6"/></svg></button>
+    <button class="ico" type="button" data-ch="parkour" title="Minecraft parkour" aria-label="Minecraft parkour"><svg viewBox="0 0 24 24"><path d="M12 2.5l8.5 4.75v9.5L12 21.5l-8.5-4.75v-9.5z"/><path d="M3.5 7.25L12 12l8.5-4.75M12 12v9.5"/></svg></button>
+    <button class="ico" type="button" data-ch="link" title="Your links: YouTube or Twitch" aria-label="Your links"><svg viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/></svg></button>
+    <div class="stim-title" id="stim-title"></div>
+    <input class="vol" id="stim-vol" type="range" min="0" max="100" step="1" title="YouTube volume" aria-label="YouTube volume" hidden>
+    <button class="ico" type="button" id="stim-prev" title="Previous" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5l-9 7 9 7z"/></svg></button>
+    <button class="ico" type="button" id="stim-next" title="Next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l9 7-9 7z"/></svg></button>
+    <button class="ico" type="button" id="stim-close" title="Close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <i class="grip n" data-grip="n"></i><i class="grip s" data-grip="s"></i><i class="grip e" data-grip="e"></i><i class="grip w" data-grip="w"></i>
+  <i class="grip ne" data-grip="ne"></i><i class="grip nw" data-grip="nw"></i><i class="grip se" data-grip="se"></i><i class="grip sw" data-grip="sw"></i>
+</div>
+<dialog id="sum" aria-labelledby="sum-goal">
+  <div class="dhead"><div><div class="name" id="sum-name"></div><div class="goal" id="sum-goal"></div></div><button class="dclose" type="button" data-close>Close</button></div>
+  <div class="dbody body" id="sum-body" tabindex="-1" autofocus></div>
+</dialog>
+<script>
+const app = document.getElementById('app');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Small markdown renderer for agent messages: fences, inline code, bold, italic, links, headings, lists, tables.
+function md(src) {
+  const fences = [];
+  src = src.replace(/```[^\n]*\n([\s\S]*?)```/g, (m, code) => {
+    fences.push('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>');
+    return '\n\u0000' + (fences.length - 1) + '\u0000\n';
+  });
+  const out = [];
+  let para = [], list = null, table = null;
+  const flushPara = () => { if (para.length) out.push('<p>' + para.map(inline).join('<br>') + '</p>'); para = []; };
+  const flushList = () => { if (list) out.push(`<${list.tag}>` + list.items.join('') + `</${list.tag}>`); list = null; };
+  const flushTable = () => {
+    if (!table) return;
+    const rows = table.filter(r => !/^\|?\s*:?-{2,}/.test(r)).map(r => r.replace(/^\||\|$/g, '').split('|').map(c => inline(c.trim())));
+    out.push('<div class="tw"><table>' + rows.map((r, i) => '<tr>' + r.map(c => i ? `<td>${c}</td>` : `<th>${c}</th>`).join('') + '</tr>').join('') + '</table></div>');
+    table = null;
+  };
+  const flush = () => { flushPara(); flushList(); flushTable(); };
+  for (const raw of src.split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    let m;
+    if ((m = line.match(/^\u0000(\d+)\u0000$/))) { flush(); out.push(fences[m[1]]); continue; }
+    if (!line.trim()) { flush(); continue; }
+    if (line.trim().startsWith('|')) { flushPara(); flushList(); (table = table || []).push(line.trim()); continue; }
+    flushTable();
+    if ((m = line.match(/^#{1,6}\s+(.*)/))) { flush(); out.push('<h4>' + inline(m[1]) + '</h4>'); continue; }
+    if ((m = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)/))) {
+      flushPara();
+      const tag = /\d/.test(m[2]) ? 'ol' : 'ul';
+      if (!list) list = { tag, items: [] };
+      const depth = Math.floor(m[1].length / 2);
+      list.items.push(`<li${depth ? ` style="margin-left:${depth * 1.2}em"` : ''}>${inline(m[3])}</li>`);
+      continue;
+    }
+    if (list && /^\s{2,}/.test(raw)) { list.items[list.items.length - 1] = list.items[list.items.length - 1].replace(/<\/li>$/, '<br>' + inline(line.trim()) + '</li>'); continue; }
+    flushList();
+    para.push(line);
+  }
+  flush();
+  return out.join('');
+}
+function inline(s) {
+  const codes = [];
+  s = esc(s).replace(/`([^`]+)`/g, (m, c) => { codes.push('<code>' + c + '</code>'); return '\u0001' + (codes.length - 1) + '\u0001'; });
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s.replace(/\u0001(\d+)\u0001/g, (m, i) => codes[i]);
+}
+const plain = t => t.replace(/```[\s\S]*?```/g, ' ').replace(/[*`#>|]/g, '').replace(/\s+/g, ' ').trim();
+
+// Every session gets its own colour, so you can tell them apart in the timeline.
+const HUES = ['#7cc4ff', '#ff8fab', '#a3e36b', '#b9a3ff', '#5fe0cf', '#ffb283', '#e6e08e'];
+function hue(id) { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return HUES[h % HUES.length]; }
+const tag = id => `<i class="cell tag" style="background:${hue(id)}"></i>`;
+
+const clock = t => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+function span(t) {
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return Math.round(s) + ' s';
+  if (s < 3600) return Math.round(s / 60) + ' min';
+  if (s < 86400) return Math.round(s / 3600) + ' h';
+  return Math.round(s / 86400) + ' d';
+}
+const since = s => !s.stateSince ? '' : s.state === 'waiting' ? `waiting ${span(s.stateSince)}` : s.state === 'working' ? `working ${span(s.stateSince)}`
+  : s.state === 'finished' ? `finished ${span(s.stateSince)} ago` : `closed ${clock(s.endedAt || s.lastAt)}`;
+// An icon placeholder; drawIcons() turns every one on the page into the real SVG.
+const ic = (name, cls = '') => `<i data-lucide="${esc(name || 'circle')}" class="li ${cls}" aria-hidden="true"></i>`;
+// An icon inside a honeycomb cell. The cell is a vector shape, so its rim and centre stay exact at any zoom.
+const HEX = '<svg class="hxs" viewBox="0 0 26 22" preserveAspectRatio="none" aria-hidden="true"><polygon points="6.5,0 19.5,0 26,11 19.5,22 6.5,22 0,11"/></svg>';
+const hex = (name, state = 'done', cls = '') => `<span class="hx ${esc(state)} ${cls}">${HEX}${ic(name)}</span>`;
+function drawIcons() { if (window.lucide) lucide.createIcons(); }
+const comb = p =>`<div class="comb" aria-label="${p.done} of ${p.total} steps done">${p.steps.map(x => `<i class="cell ${esc(x.s)}"></i>`).join('')}</div>`;
+function nowText(s) {
+  const t = (s.progress && s.progress.now) || '';
+  if (s.state === 'waiting') return t;
+  const r = t.replace(/^(Your turn|Done):\s*/i, ''); // the group already says it, so the prefix goes
+  return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
+// ---- Progress board ----
+const seen = new Map(); // session id -> last message time, to flash rows that just spoke
+function row(s) {
+  const p = s.progress, cls = s.state === 'waiting' ? 'needs' : s.state;
+  const fresh = seen.has(s.id) && seen.get(s.id) !== s.lastAt;
+  seen.set(s.id, s.lastAt);
+  return `<div class="row ${cls}${fresh ? ' fresh' : ''}" tabindex="0" data-id="${esc(s.id)}">
+    <div class="who"><div class="name">${tag(s.id)}<span>${esc(s.name)}</span></div><div class="meta"><span>${esc(s.project)}</span><span class="since">${since(s)}</span></div></div>
+    <div class="what">${p ? `<div class="goal">${hex(p.icon, 'done', 'sm')}<span>${esc(p.goal)}</span></div><div class="nowline">${esc(nowText(s))}</div>` : `<div class="nowline">${s.state === 'closed' ? 'No progress recorded' : 'Reading this session'}</div>`}</div>
+    <div class="score">${p ? `<div class="pct">${p.pct}%</div>${comb(p)}${sumBtn(s)}` : ''}</div>
+  </div>`;
+}
+
+// ---- Summary pop-up: a headline, the numbers that matter, a few tagged facts, and your move ----
+const sumBtn = (s, hist) => (hist !== undefined || (s.progress && s.progress.brief))
+  ? `<button class="sumbtn" type="button" data-summary="${esc(s.id)}"${hist !== undefined ? ` data-hist="${hist}"` : ''}>Summary</button>` : '';
+const dlg = document.getElementById('sum');
+let dlgFor = null, lastState = { sessions: [] };
+function fillSummary() {
+  const s = lastState.sessions.find(x => x.id === dlgFor.id);
+  if (!s || !s.progress) return;
+  const src = dlgFor.hist !== undefined ? s.progress.history[dlgFor.hist] : s.progress;
+  if (!src) return;
+  document.getElementById('sum-name').innerHTML = `<span class="name">${tag(s.id)}<span>${esc(s.name)}</span></span>`;
+  document.getElementById('sum-goal').innerHTML = `${hex(src.icon)}<span>${esc(src.goal)}</span>`;
+  const body = document.getElementById('sum-body'), html = briefHtml(src.brief);
+  if (body.dataset.html !== html) { body.dataset.html = html; body.innerHTML = html; }
+  drawIcons();
+}
+function briefHtml(b) {
+  if (!b) return '<div class="brief"><div class="headline">Writing this summary now. It appears here in a few seconds.</div></div>';
+  const KIND = { done: 'Done', found: 'Found', problem: 'Problem', decided: 'Decided' };
+  let i = 0;
+  const parts = [`<div class="headline" style="--i:${i++}">${esc(b.headline)}</div>`];
+  // "before → after" shows the new value big and the old one small above it.
+  const stat = x => {
+    const [was, now] = x.value.split(/\s*→\s*/);
+    return `<div class="stat">${now ? `<span class="was">was ${esc(was)}</span><b>${esc(now)}</b>` : `<b>${esc(x.value)}</b>`}<span class="slabel">${ic(x.i || 'activity')}${esc(x.label)}</span></div>`;
+  };
+  if (b.stats.length) parts.push(`<div class="stats" style="--i:${i++}">${b.stats.map(stat).join('')}</div>`);
+  // Each fact: its own icon, coloured by kind (honey done, white found, red problem, blue decided).
+  const KIND_ICON = { done: 'circle-check', found: 'search', problem: 'bug', decided: 'list-checks' };
+  if (b.facts.length) parts.push(`<div class="facts" style="--i:${i++}">${b.facts.map(f => `<div class="fact ${esc(f.k)}">${hex(f.i || KIND_ICON[f.k], f.k)}<span class="k">${KIND[f.k]}</span><span>${esc(f.t)}</span></div>`).join('')}</div>`);
+  if (b.next) parts.push(`<div class="nextbox${b.you ? ' you' : ''}" style="--i:${i++}"><span class="k">${b.you ? 'Your move' : 'Next'}</span><p>${esc(b.next)}</p></div>`);
+  return `<div class="brief">${parts.join('')}</div>`;
+}
+function openSummary(id, hist) {
+  dlgFor = { id, hist };
+  fillSummary();
+  document.getElementById('sum-body').scrollTop = 0;
+  dlg.showModal();
+}
+dlg.addEventListener('click', e => { if (e.target === dlg || e.target.closest('[data-close]')) dlg.close(); });
+
+let route = null, showClosed = false;
+try { showClosed = localStorage.getItem('hive.closed') === '1'; } catch {}
+
+function renderBoard(d) {
+  const of = st => d.sessions.filter(s => s.state === st);
+  const needs = of('waiting'), working = of('working'), finished = of('finished'), closed = of('closed');
+  const group = (label, cls, list) => list.length ? `<section class="group"><div class="label ${cls}">${label} ${list.length}</div>${list.map(row).join('')}</section>` : '';
+  let h = group('Needs you', 'needs', needs) + group('Working', 'working', working) + group('Finished', 'finished', finished);
+  if (!needs.length && !working.length && !finished.length) h = `<div class="quiet"><img src="/logo.svg" alt=""><b>The hive is quiet.</b><span>Start a Claude Code session and it shows up here.</span></div>`;
+  if (closed.length) {
+    h += `<button class="more" type="button" data-toggle>${showClosed ? 'Hide' : 'Show'} ${closed.length} closed today</button>`;
+    if (showClosed) h += `<section class="group" style="margin-top:18px">${closed.map(row).join('')}</section>`;
+  }
+  return h;
+}
+
+// ---- Timeline: blocks that start with what you asked; short updates stay one line ----
+const open = new Set(); // messages you expanded
+const key = m => (m.sid || '') + m.at + m.text.length;
+const isShort = t => t.length < 220 && !/\n\s*([-*|]|\d+\.)/.test(t);
+
+function turns(msgs) {
+  const out = [];
+  let cur = null;
+  for (const m of msgs) {
+    if (m.role === 'you') {
+      // Prompts sent back to back belong together; a resent, longer version replaces the first.
+      if (cur && cur.asks.length && !cur.items.length) {
+        const last = cur.asks[cur.asks.length - 1];
+        if (!m.kind && !last.kind && m.text.startsWith(last.text)) cur.asks[cur.asks.length - 1] = m; else cur.asks.push(m);
+        continue;
+      }
+      cur = { asks: [m], items: [] }; out.push(cur); continue;
+    }
+    if (!cur) { cur = { asks: [], items: [] }; out.push(cur); }
+    cur.items.push(m);
+  }
+  return out;
+}
+
+function itemHtml(m, isResult) {
+  if (/^\*\*(Question|Plan for your approval)/.test(m.text)) isResult = false;
+  const k = esc(key(m)), expanded = open.has(key(m));
+  if (isShort(m.text) && !isResult) {
+    return `<div class="item"><span class="t">${clock(m.at)}</span><span class="node"><i class="cell"></i></span>
+      <div class="line${expanded ? ' open body' : ''}" data-open="${k}"${expanded ? '' : ` title="${esc(plain(m.text))}"`}>${expanded ? md(m.text) : esc(plain(m.text))}</div></div>`;
+  }
+  const clamp = !isResult && !expanded && m.text.length > 600;
+  return `<div class="item"><span class="t">${clock(m.at)}</span><span class="node"><i class="cell${isResult ? ' result' : ''}"></i></span>
+    <div class="block body${isResult ? ' result' : ''}${clamp ? ' clamp' : ''}"${clamp ? ` data-open="${k}"` : ''}>${isResult ? '<div class="rlabel">Result</div>' : ''}${md(m.text)}</div></div>`;
+}
+
+function turnHtml(t) {
+  const h = t.asks.map(a => {
+    const k = key(a), long = a.text.length > 240 && !open.has(k);
+    return `<div class="ask"><span class="t">${clock(a.at)}</span><span class="from">${a.kind === 'answer' ? 'You answered' : 'You asked'}</span>
+      <div class="text${long ? ' clamp' : ''}"${long ? ` data-open="${esc(k)}"` : ''}>${esc(a.text).replace(/\n/g, '<br>')}</div></div>`;
+  }).join('');
+  return `<div class="turn">${h}${t.items.map(m => itemHtml(m, !!m.final)).join('')}</div>`;
+}
+
+let limit = 6;
+function timeline(msgs) {
+  const ts = turns(msgs);
+  const shown = ts.slice(-limit).reverse();
+  const html = shown.map(turnHtml).join('');
+  return `<div class="timeline">${html || '<div>No messages yet</div>'}</div>` +
+    (ts.length > limit ? `<button class="more" type="button" data-earlier style="margin-top:24px">Show earlier</button>` : '');
+}
+
+function renderSession(d) {
+  const s = d.session, p = s.progress, cls = s.state === 'waiting' ? 'needs' : s.state;
+  const status = cls === 'needs' ? `Needs you for ${span(s.stateSince)}` : cls === 'working' ? `Working for ${span(s.stateSince)}`
+    : cls === 'finished' ? `Finished ${span(s.stateSince)} ago` : `Closed at ${clock(s.endedAt || s.lastAt)}`;
+  const hist = p && p.history && p.history.length ? `<h2>Earlier in this session</h2><div class="earlier">${p.history.map((h, i) => `<div${h.done >= h.total ? ' class="full"' : ''}><span class="node">${hex(h.icon, h.done >= h.total ? 'done' : 'todo')}</span><span>${esc(h.goal)}</span><b>${h.done} of ${h.total}</b>${sumBtn(s, i)}</div>`).join('')}</div>` : '';
+  return `<div class="view ${cls}">
+    <button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button>
+    <div class="vtitle"><h1 class="vname">${tag(s.id)}<span>${esc(s.name)}</span></h1>${sumBtn(s)}</div>
+    <div class="status ${cls}">${status}${s.project ? ` in ${esc(s.project)}` : ''}</div>
+    ${p ? `<div class="goal">${hex(p.icon)}<span>${esc(p.goal)}</span></div>
+      <div class="score"><div class="pct">${p.pct}%</div>${comb(p)}</div>
+      <div class="nowline">${esc(nowText(s))}</div>
+      <ul class="steps">${p.steps.map(x => `<li class="${esc(x.s)}">${hex(x.i, x.s)}<span>${esc(x.t)}</span></li>`).join('')}</ul>`
+      : '<div class="nowline">Reading this session</div>'}
+    ${hist}
+    <h2>Timeline</h2>
+    ${timeline(d.msgs)}
+  </div>`;
+}
+
+// All sessions: consecutive messages from one session form one block, newest block first.
+function renderFeed(d) {
+  const blocks = [];
+  for (const m of d.msgs) {
+    const b = blocks[blocks.length - 1];
+    if (b && b.sid === m.sid) b.msgs.push(m); else blocks.push({ sid: m.sid, name: m.name, msgs: [m] });
+  }
+  const shown = blocks.slice(-limit * 3).reverse();
+  const html = shown.map(b => `<div class="turn"><button class="sess" type="button" data-id="${esc(b.sid)}">${tag(b.sid)}${esc(b.name)}</button>
+      ${turns(b.msgs).map(turnHtml).join('')}</div>`).join('');
+  return `<div class="view"><div class="timeline">${html || '<div>Nothing said yet</div>'}</div>` +
+    (blocks.length > limit * 3 ? `<button class="more" type="button" data-earlier style="margin-top:24px">Show earlier</button>` : '') + '</div>';
+}
+
+async function load() {
+  const r = location.hash.slice(1);
+  if (r !== route) { route = r; limit = 6; window.scrollTo(0, 0); }
+  document.getElementById('tab-board').classList.toggle('on', r !== 'feed');
+  document.getElementById('tab-feed').classList.toggle('on', r === 'feed');
+  const state = await (await fetch('/api/state')).json();
+  lastState = state;
+  document.getElementById('demo-tag').hidden = !state.demo;
+  secureUrl = state.secure || '';
+  if (!triedSecure) goSecure();
+  if (dlg.open) fillSummary();
+  const waiting = state.sessions.filter(s => s.state === 'waiting').length;
+  document.title = waiting ? `(${waiting}) Hive` : 'Hive';
+  if (r.startsWith('s/')) {
+    const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)));
+    app.innerHTML = res.ok ? renderSession(await res.json()) : '<div class="view"><button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button><div class="nowline">That session has left the hive.</div></div>';
+  } else if (r === 'feed') {
+    app.innerHTML = renderFeed(await (await fetch('/api/feed')).json());
+  } else {
+    app.innerHTML = renderBoard(state);
+  }
+  drawIcons();
+}
+
+// On this laptop, hive.localhost moves to the secure Tailscale address whenever Tailscale is reachable,
+// so Hive is the same page everywhere (and Twitch, which needs HTTPS, plays). Without Tailscale it stays local.
+let secureUrl = '', triedSecure = false;
+async function goSecure() {
+  triedSecure = true;
+  if (location.protocol !== 'http:' || !secureUrl) return;
+  try {
+    const ctl = new AbortController(); setTimeout(() => ctl.abort(), 2500);
+    const r = await fetch(secureUrl + '/api/ping', { cache: 'no-store', signal: ctl.signal });
+    if (r.ok) location.replace(secureUrl + location.pathname + location.hash);
+  } catch {}
+}
+
+// Re-render on every change, but never while you are selecting text.
+let pending = false, busy = false;
+async function refresh() {
+  if (busy || String(getSelection())) { pending = true; return; }
+  busy = true; pending = false;
+  try { await load(); } catch {}
+  busy = false;
+  if (pending) setTimeout(refresh, 300);
+}
+document.addEventListener('selectionchange', () => { if (pending && !String(getSelection())) refresh(); });
+
+document.addEventListener('click', e => {
+  if (e.target.closest('a') || String(getSelection())) return;
+  if (e.target.closest('[data-toggle]')) {
+    showClosed = !showClosed;
+    try { localStorage.setItem('hive.closed', showClosed ? '1' : '0'); } catch {}
+    return refresh();
+  }
+  if (e.target.closest('[data-earlier]')) { limit += 6; return refresh(); }
+  const sb = e.target.closest('[data-summary]');
+  if (sb) return openSummary(sb.dataset.summary, sb.dataset.hist !== undefined ? +sb.dataset.hist : undefined);
+  const o = e.target.closest('[data-open]');
+  if (o) { const k = o.dataset.open; open.has(k) ? open.delete(k) : open.add(k); return refresh(); }
+  const go = e.target.closest('[data-go]');
+  if (go) { location.hash = go.dataset.go; return; }
+  const t = e.target.closest('[data-id]');
+  if (t) location.hash = 's/' + t.dataset.id;
+});
+app.addEventListener('keydown', e => { const t = e.target.closest('.row'); if (t && e.key === 'Enter') location.hash = 's/' + t.dataset.id; });
+addEventListener('hashchange', refresh);
+
+// ---- Stimulation window ----
+// Long gameplay videos (embeddable, checked 2026-10-22); each play starts at a random point.
+const YT = { subway: ['HeQQwg_N0Yg', 'OYqBLPc01Dg'], parkour: ['85z7jqGAGcc', 'eBExtYRpuqI'] };
+const LABEL = { subway: 'Subway Surfers', parkour: 'Minecraft parkour' };
+const stim = document.getElementById('stim'), view = document.getElementById('stim-view'), titleEl = document.getElementById('stim-title');
+const store = { get(k, d) { try { const v = localStorage.getItem('hive.stim.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('hive.stim.' + k, JSON.stringify(v)); } catch {} } };
+let channel = store.get('channel', 'clips'), clipList = null, ytIndex = 0, linkIndex = store.get('linkIndex', 0);
+const played = [], ahead = []; // what played before, for Previous; what Previous skipped back over, for Next
+
+// A link can be YouTube (video, short, live) or Twitch (channel, past broadcast, clip).
+function parseLink(url) {
+  const s = String(url).trim().replace(/^(?:https?:\/\/)?(?:www\.)?ttv\//i, 'twitch.tv/'); // "ttv/name" is short for twitch.tv/name
+  let m = s.match(/(?:youtube\.com\/(?:watch\?.*?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([\w-]{11})/);
+  if (m) return { kind: 'yt', id: m[1], label: 'YouTube video' };
+  if ((m = s.match(/clips\.twitch\.tv\/(?:embed\?clip=)?([\w-]+)/) || s.match(/twitch\.tv\/[\w]+\/clip\/([\w-]+)/))) return { kind: 'twclip', id: m[1], label: 'Twitch clip' };
+  if ((m = s.match(/twitch\.tv\/videos\/(\d+)/))) return { kind: 'twvod', id: m[1], label: 'Twitch video' };
+  if ((m = s.match(/twitch\.tv\/([A-Za-z0-9_]{3,25})(?:[/?#]|$)/))) return { kind: 'twlive', id: m[1].toLowerCase(), label: `${m[1]} live on Twitch` };
+  return null;
+}
+const links = () => store.get('links', []);
+
+function embed(item) {
+  const host = location.hostname, mute = audio.muted ? 'true' : 'false';
+  if (item.kind === 'yt') return `https://www.youtube-nocookie.com/embed/${item.id}?autoplay=1&mute=${audio.muted ? 1 : 0}&controls=1&rel=0&playsinline=1&enablejsapi=1&start=${item.start || 0}`;
+  if (item.kind === 'twlive') return `https://player.twitch.tv/?channel=${item.id}&parent=${host}&autoplay=true&muted=${mute}`;
+  if (item.kind === 'twvod') return `https://player.twitch.tv/?video=${item.id}&parent=${host}&autoplay=true&muted=${mute}`;
+  if (item.kind === 'twclip') return `https://clips.twitch.tv/embed?clip=${item.id}&parent=${host}&autoplay=true&muted=${mute}`;
+}
+
+// Draws one item. Clips are real <video> with the normal seek bar; YouTube and Twitch use their own players.
+function render(item) {
+  stim.classList.remove('pick');
+  if (item.kind.startsWith('tw') && location.protocol === 'http:') {
+    view.innerHTML = `<div class="stim-pick"><label>Twitch only plays on Hive's secure address.</label>
+      ${secureUrl ? `<div class="hint">Turn on Tailscale, then open Hive here:</div><a class="play" href="${esc(secureUrl + location.pathname + location.hash)}">Open secure Hive</a>` : '<div class="hint">Turn on Tailscale and reload this page.</div>'}</div>`;
+  } else if (item.kind === 'clip') {
+    view.innerHTML = `<video src="/clip/${item.id}" playsinline controls></video>`;
+    const v = view.querySelector('video');
+    v.muted = audio.muted; v.volume = audio.volume / 100;
+    let quiet = false; // a fallback mute (see below) is not your choice, so it isn't remembered
+    v.onvolumechange = () => { if (!quiet) saveAudio(v.muted, v.volume * 100); };
+    // Chrome only allows sound after you've clicked on the page; otherwise start muted.
+    v.play().catch(() => { quiet = true; v.muted = true; v.play().catch(() => {}); setTimeout(() => { quiet = false; }, 300); });
+    v.onended = () => next();
+    v.onerror = () => next();
+  } else {
+    view.innerHTML = `<iframe src="${embed(item)}" allow="autoplay; encrypted-media; fullscreen" allowfullscreen title="${esc(item.label)}"></iframe>`;
+    if (item.kind === 'yt') { const f = view.querySelector('iframe'); f.onload = () => ytSetup(f); }
+  }
+  ytVol.hidden = item.kind !== 'yt';
+  ytVol.value = audio.volume;
+  titleEl.textContent = item.label;
+  document.querySelectorAll('[data-ch]').forEach(b => b.classList.toggle('on', b.dataset.ch === item.ch));
+}
+
+// Your own clips come from the folders listed under "clips" in hive.config.json; without any, that channel hides.
+async function loadClips() {
+  if (!clipList) { try { clipList = await (await fetch('/api/clips')).json(); } catch { clipList = []; } }
+  document.querySelector('[data-ch="clips"]').hidden = !clipList.length;
+  return clipList;
+}
+async function fresh() {
+  if (channel === 'clips' && !(await loadClips()).length) channel = 'subway';
+  if (channel === 'clips') {
+    const c = clipList[Math.floor(Math.random() * clipList.length)];
+    return { ch: 'clips', kind: 'clip', id: c.id, label: `${c.label}: ${c.name}` };
+  }
+  if (channel === 'link') {
+    const l = links();
+    if (!l.length) return null;
+    linkIndex = linkIndex % l.length; store.set('linkIndex', linkIndex);
+    const p = parseLink(l[linkIndex]);
+    return p && { ch: 'link', ...p };
+  }
+  const ids = YT[channel];
+  return { ch: channel, kind: 'yt', id: ids[ytIndex % ids.length], start: Math.floor(Math.random() * 2400), label: LABEL[channel] };
+}
+
+let current = null;
+async function show(item) { if (current) played.push(current); current = item; render(item); }
+async function next() {
+  if (ahead.length) { played.push(current); current = ahead.pop(); return render(current); }
+  if (channel === 'link') linkIndex++; else ytIndex++;
+  const item = await fresh();
+  item ? show(item) : picker();
+}
+function prev() {
+  if (!played.length) return;
+  ahead.push(current); current = played.pop(); render(current);
+}
+async function start() { ahead.length = 0; const item = await fresh(); item ? show(item) : picker(); }
+
+// The link picker: paste a YouTube or Twitch link; saved links stay as chips.
+function picker() {
+  stim.classList.add('pick');
+  document.querySelectorAll('[data-ch]').forEach(b => b.classList.toggle('on', b.dataset.ch === 'link'));
+  titleEl.textContent = 'Your links';
+  const l = links();
+  view.innerHTML = `<div class="stim-pick">
+    <label for="stim-url">Paste a YouTube or Twitch link</label>
+    <form id="stim-form"><input id="stim-url" placeholder="ttv/channel or a YouTube link" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="play" type="submit">Play</button></form>
+    <div class="hint" id="stim-hint">ttv/name plays that Twitch channel live. Twitch videos and clips and any YouTube video work too.</div>
+    ${l.length ? `<div class="saved">${l.map((u, i) => `<button type="button" data-link="${i}"${i === linkIndex % l.length ? ' class="on"' : ''} title="${esc(u)}">${esc((parseLink(u) || {}).label || u)}</button>`).join('')}</div>` : ''}
+  </div>`;
+}
+view.addEventListener('submit', e => {
+  e.preventDefault();
+  const v = document.getElementById('stim-url').value.trim();
+  if (!parseLink(v)) { document.getElementById('stim-hint').textContent = 'That link is not a YouTube or Twitch video, channel or clip.'; return; }
+  const l = links().filter(u => u !== v); l.unshift(v);
+  store.set('links', l.slice(0, 8)); linkIndex = 0; store.set('linkIndex', 0);
+  channel = 'link'; store.set('channel', channel); start();
+});
+view.addEventListener('click', e => {
+  const b = e.target.closest('[data-link]');
+  if (!b) return;
+  linkIndex = +b.dataset.link; store.set('linkIndex', linkIndex);
+  channel = 'link'; store.set('channel', channel); start();
+});
+document.querySelectorAll('[data-ch]').forEach(b => b.onclick = () => {
+  // Pressing the link icon while a link plays opens the picker, to add or switch links.
+  if (b.dataset.ch === 'link' && (channel === 'link' || !links().length)) return picker();
+  channel = b.dataset.ch; store.set('channel', channel); start();
+});
+document.getElementById('stim-next').onclick = () => next();
+document.getElementById('stim-prev').onclick = () => prev();
+
+// Sound is set in each player's own controls. Hive remembers mute and volume, so the next video starts the same way.
+let audio = store.get('audio', { muted: true, volume: 50 }), ytListenFrom = 0;
+function saveAudio(muted, volume) {
+  audio = { muted: !!muted, volume: Math.max(0, Math.min(100, Math.round(volume))) };
+  store.set('audio', audio);
+}
+function ytCommand(func, args = []) {
+  const f = view.querySelector('iframe');
+  if (f && current && current.kind === 'yt') f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*');
+}
+// After YouTube loads: ask it to report changes, then give it the remembered sound (it ignores commands until ready).
+function ytSetup(f) {
+  ytListenFrom = Date.now() + 4500; // its first reports are its own defaults, not your choice
+  [700, 1800, 4000].forEach(t => setTimeout(() => {
+    if (view.querySelector('iframe') !== f) return;
+    f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'hive', channel: 'widget' }), '*');
+    ytCommand('setVolume', [audio.volume]);
+    ytCommand(audio.muted ? 'mute' : 'unMute');
+  }, t));
+}
+addEventListener('message', e => {
+  if (!/^https:\/\/www\.youtube(-nocookie)?\.com$/.test(e.origin) || Date.now() < ytListenFrom) return;
+  let d;
+  try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+  const info = d && d.event === 'infoDelivery' && d.info;
+  if (info && ('muted' in info || 'volume' in info)) {
+    saveAudio('muted' in info ? info.muted : audio.muted, 'volume' in info ? info.volume : audio.volume);
+    ytVol.value = audio.muted ? 0 : audio.volume;
+  }
+});
+// YouTube's own slider closes while the mouse crosses the gap to reach it in small players,
+// so YouTube also gets a slider in our bar (above the video, never over it).
+const ytVol = document.getElementById('stim-vol');
+ytVol.addEventListener('input', () => {
+  const v = +ytVol.value;
+  saveAudio(v === 0, v);
+  ytListenFrom = Date.now() + 800; // YouTube's echo of this change is not a new choice
+  ytCommand('setVolume', [v]);
+  ytCommand(v === 0 ? 'mute' : 'unMute');
+});
+
+function toggleStim(open) {
+  stim.hidden = !open;
+  document.getElementById('tab-stim').classList.toggle('on', open);
+  store.set('open', open);
+  if (open) { place(); start(); } else { view.innerHTML = ''; current = null; played.length = 0; ahead.length = 0; document.body.style.paddingBottom = ''; }
+}
+document.getElementById('tab-stim').onclick = () => toggleStim(stim.hidden);
+document.getElementById('stim-close').onclick = () => toggleStim(false);
+
+// Position and size are remembered and kept on screen. Drag by the top edge; resize from any edge or corner.
+// Positions and the mouse are in screen pixels; the page is zoomed (150% on computers), so sizes in page pixels
+// are multiplied by the zoom here and styles get divided back.
+const zoom = () => parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+const MIN_W = 220, MIN_H = 124;
+function setRect(r) {
+  const z = zoom();
+  const w = Math.max(MIN_W * z, Math.min(r.w, innerWidth - 16)), h = Math.max(MIN_H * z, Math.min(r.h, innerHeight - 16));
+  const top = matchMedia('(hover: none)').matches ? 8 : 50 * z; // on a computer the icon bar needs room above the player
+  const x = Math.max(8 - w + 120, Math.min(r.x, innerWidth - 120)), y = Math.max(top, Math.min(r.y, innerHeight - 46));
+  Object.assign(stim.style, { left: x / z + 'px', top: y / z + 'px', width: w / z + 'px', height: h / z + 'px' });
+  // On a phone the page gets room at the bottom, so nothing hides behind the player.
+  document.body.style.paddingBottom = innerWidth < 600 && !stim.hidden ? (h / z + 40) + 'px' : '';
+}
+function place() {
+  const r = store.get('rect', null);
+  if (r) return setRect(r);
+  if (innerWidth < 600) { // phone: full width at the bottom, 16:9
+    const touch = matchMedia('(hover: none)').matches, w = innerWidth - 16;
+    const h = touch ? Math.round((w - 16) * 9 / 16) + 42 + 8 : Math.round((w - 10) * 9 / 16) + 10; // 16:9 video + icon bar and frame
+    return setRect({ x: 8, y: innerHeight - h - 16, w, h });
+  }
+  const z = zoom();
+  setRect({ x: innerWidth - 464 * z, y: innerHeight - 290 * z, w: 440 * z, h: 248 * z });
+}
+const saveRect = () => { const b = stim.getBoundingClientRect(); store.set('rect', { x: b.left, y: b.top, w: b.width, h: b.height }); };
+function track(e, onMove) {
+  e.preventDefault();
+  const el = e.currentTarget, b = stim.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+  stim.classList.add('busy');
+  el.setPointerCapture(e.pointerId);
+  const move = ev => onMove(b, ev.clientX - x0, ev.clientY - y0);
+  const up = () => { stim.classList.remove('busy'); el.removeEventListener('pointermove', move); saveRect(); };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up, { once: true });
+  el.addEventListener('pointercancel', up, { once: true });
+}
+// The whole bar drags, icons included: a press that moves more than a few pixels is a drag, otherwise a tap.
+function startDrag(e) {
+  if (e.target.closest('input')) return; // the slider slides, it doesn't drag the window
+  const b = stim.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+  let dragging = false;
+  const move = ev => {
+    const dx = ev.clientX - x0, dy = ev.clientY - y0;
+    if (!dragging) {
+      if (Math.hypot(dx, dy) < 6) return;
+      dragging = true; stim.classList.add('busy');
+    }
+    setRect({ x: b.left + dx, y: b.top + dy, w: b.width, h: b.height });
+  };
+  const up = () => {
+    removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+    if (!dragging) return;
+    stim.classList.remove('busy'); saveRect();
+    const eat = ev => { ev.stopPropagation(); ev.preventDefault(); }; // the drag's release is not a tap
+    addEventListener('click', eat, true);
+    setTimeout(() => removeEventListener('click', eat, true), 60);
+  };
+  // Listen on the whole window: the pointer leaves the bar long before the drag ends.
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+}
+document.getElementById('stim-top').addEventListener('pointerdown', startDrag);
+document.querySelectorAll('[data-grip]').forEach(g => g.addEventListener('pointerdown', e => {
+  const d = g.dataset.grip;
+  track(e, (b, dx, dy) => {
+    let { left: x, top: y, width: w, height: h } = b;
+    if (d.includes('e')) w = b.width + dx;
+    if (d.includes('s')) h = b.height + dy;
+    if (d.includes('w')) { w = Math.max(MIN_W * zoom(), b.width - dx); x = b.right - w; }
+    if (d.includes('n')) { h = Math.max(MIN_H * zoom(), b.height - dy); y = b.bottom - h; }
+    setRect({ x, y, w, h });
+  });
+}));
+addEventListener('resize', () => { if (!stim.hidden) place(); });
+if (store.get('open', false)) toggleStim(true);
+
+new EventSource('/events').onmessage = refresh;
+setInterval(refresh, 30000);
+refresh();
+</script>
+</body>
+</html>

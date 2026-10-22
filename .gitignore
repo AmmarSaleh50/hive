@@ -1,0 +1,10 @@
+# Your settings and everything Hive learns about your sessions stay on your machine.
+hive.config.json
+data/
+progress-cache.json
+usage.jsonl
+
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

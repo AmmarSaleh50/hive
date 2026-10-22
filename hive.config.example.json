@@ -1,0 +1,18 @@
+{
+  "port": 4747,
+  "extraPorts": [80],
+  "claudeDir": "~/.claude",
+  "claudeBin": "",
+  "summaries": {
+    "enabled": true,
+    "model": "haiku",
+    "openEverySeconds": 12,
+    "backgroundEverySeconds": 300
+  },
+  "closedHours": 6,
+  "clips": [
+    { "path": "~/Videos/Clips", "label": "Gameplay" }
+  ],
+  "tailscale": true,
+  "dataDir": "./data"
+}

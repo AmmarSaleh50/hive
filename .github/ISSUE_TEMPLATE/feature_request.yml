@@ -1,0 +1,19 @@
+name: Idea or feature request
+description: Something Hive could do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's annoying or missing
+      description: Describe the situation, not the solution yet. "With six sessions running I can't tell which one ..." is perfect.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+  - type: textarea
+    id: else
+    attributes:
+      label: Anything else
