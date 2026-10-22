@@ -19,7 +19,7 @@ There is nothing to install: Hive is plain Node (18+) with no dependencies, and 
 |---|---|
 | `server.cjs` | Reads Claude Code's files, asks Haiku for progress, serves the page and the API |
 | `demo.cjs` | The made-up sessions behind `npm run demo` and every screenshot |
-| `public/index.html` | The whole interface: board, session page, briefing, player |
+| `public/index.html` | The whole interface: board, session page with its messages, briefing, player |
 | `scripts/` | Smoke test, Windows autostart, and the scripts that rebuild the brand and screenshots |
 | `docs/brand/` | Logo, wordmark and icons |
 

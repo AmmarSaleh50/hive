@@ -34,7 +34,9 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     const one = JSON.parse((await get('/api/session/demo-auth')).body);
     check(one.session.progress.steps.length > 0 && one.session.progress.brief && one.session.progress.history.length > 0,
       'a session has steps, a briefing and earlier jobs');
-    check(!('msgs' in one), 'the page is not sent the raw messages');
+    const done = JSON.parse((await get('/api/session/demo-perf')).body);
+    check(one.msgs.some(m => m.role === 'you') && done.msgs.some(m => m.final), 'a session has its messages, with the turn results marked');
+    check((await get('/api/feed')).status === 404, 'the old all-sessions feed is gone');
     check((await get('/api/session/nope')).status === 404, 'unknown session is 404');
 
     check((await get('/', 'evil.example')).status === 403, 'other host names are refused');

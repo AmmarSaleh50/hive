@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  A live board for every Claude Code session on your machine: where each one stands, what it needs from you, and a short briefing of what it did.
+  A live board for every Claude Code session on your machine: where each one stands, what it needs from you, and what it said, without the tool calls.
 </p>
 
 <p align="center">
@@ -38,6 +38,8 @@ Hive is one page that answers that at a glance.
 **Progress you can trust.** A small, cheap model (Claude Haiku) reads each session's recent messages and keeps a step list: what's done, what's happening now, what's left. Finished steps stay finished. When you give a session something new, the old job moves to "Earlier in this session" with its own summary.
 
 <p align="center"><img src="docs/screenshots/session.png" alt="A session: goal, progress, steps" width="860" /></p>
+
+**What it said, without the tool calls.** Under its steps, each session page lists what the session said to you, grouped by what you asked. Short "now doing X" lines stay on one line, results show in full, and questions and plans it put to you are included.
 
 **A briefing instead of a wall of text.** One headline, the numbers that matter (before → after), a few tagged facts and one box that says what's next or what's your move.
 
