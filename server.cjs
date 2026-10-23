@@ -839,13 +839,13 @@ function request(url, { method = 'GET', body, headers = {}, timeout = 8000 } = {
   });
 }
 const readAll = s => new Promise((resolve, reject) => { let b = ''; s.on('data', d => b += d).on('end', () => resolve(b)).on('error', reject); });
-async function pingPeers() {
-  for (const p of peers) {
-    const was = p.online;
-    try { const r = await request(p.url + '/api/ping', { timeout: 4000 }); r.stream.resume(); p.online = r.status === 200; } catch { p.online = false; }
-    if (p.online !== was) bump();
-  }
+async function pingPeer(p, timeout = 4000) {
+  const was = p.online;
+  try { const r = await request(p.url + '/api/ping', { timeout }); r.stream.resume(); p.online = r.status === 200; } catch { p.online = false; }
+  if (p.online !== was) bump();
+  return p.online;
 }
+async function pingPeers() { for (const p of peers) await pingPeer(p); }
 const machines = () => [{ name: MACHINE, self: true, online: true }, ...peers.map(p => ({ name: p.name, online: p.online, unreachable: !p.online && peerOnTailnet(p) }))]
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 async function toPeer(p, route, body) {
@@ -1005,6 +1005,8 @@ async function pipeFrom(p, route, req, res, headers = {}) {
   r.stream.on('error', () => res.end()).pipe(res);
 }
 async function viaPeer(req, res, u, p, mode) {
+  // Marked off? Look again right away (at most every 5 s), so one that just came back shows without waiting.
+  if (!p.online && u.pathname === '/api/state' && Date.now() - (p.lastTry || 0) > 5000) { p.lastTry = Date.now(); await pingPeer(p, 2500); }
   const off = { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', machine: MACHINE, machines: machines(), view: p.name, offline: true, unreachable: peerOnTailnet(p),
     sessions: [], canLaunch: false, routines: [], routine: {}, sync: null };
   if (u.pathname === '/events') {

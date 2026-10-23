@@ -7,6 +7,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 
 ### Fixed
 
+- **A computer that just came back shows right away** when you switch to it, instead of after the next 10-second check.
 - **Progress updates show up again.** Newer Claude Code writes a reply that has no text as a progress update: written-out thinking marked `thinkingDisplay: "updates"`, which Claude Code and the Claude app show like a message. Hive skipped them, so a session that only sent updates looked silent. They now appear in "What it said" and reach the progress summary. Thinking that isn't marked as an update stays private.
 
 ## 0.4.4 (2026-10-24)

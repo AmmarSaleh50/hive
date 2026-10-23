@@ -170,13 +170,19 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   fs.writeFileSync(cfgA, JSON.stringify({ machine: '4070', claudeDir: path.join(tmp2, 'a'), dataDir: path.join(tmp2, 'da'), summaries: { enabled: false }, tailscale: false,
     peers: [{ name: '2060', url: `http://localhost:${B}` }] }));
   const start = (cfg, port) => spawn(process.execPath, [path.join(root, 'server.cjs')], { env: { ...process.env, PORT: String(port), HIVE_CONFIG: cfg }, stdio: 'ignore' });
-  let hb = start(cfgB, B);
+  // "4070" starts first, so its first look at "2060" finds it off.
   const ha = start(cfgA, A);
+  let hb = null;
   try {
-    for (let i = 0; i < 50; i++) { try { await getA('/api/ping'); await getB('/api/ping'); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
-    await new Promise(r => setTimeout(r, 1500));
+    for (let i = 0; i < 50; i++) { try { await getA('/api/ping'); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    await new Promise(r => setTimeout(r, 500));
+    hb = start(cfgB, B);
+    for (let i = 0; i < 50; i++) { try { await getB('/api/ping'); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    await new Promise(r => setTimeout(r, 1500)); // let "2060" read its folder
+    // Asking for the other computer looks again at once, even if "4070" started before "2060" was up.
+    await getA('/api/state?m=2060');
     let sa = JSON.parse((await getA('/api/state')).body);
-    check(sa.machine === '4070' && sa.machines.map(x => x.name + (x.online ? '' : ' off')).join(',') === '2060,4070', `the switch lists both computers (${sa.machines.map(x => x.name).join(',')})`);
+    check(sa.machine === '4070' && sa.machines.map(x => x.name + (x.online ? '' : ' off')).join(',') === '2060,4070', `the switch lists both computers (${sa.machines.map(x => x.name + (x.online ? '' : ' off')).join(',')})`);
     const far = JSON.parse((await getA('/api/state?m=2060')).body);
     check(far.view === '2060' && far.sessions.some(s => s.id === 'far-session' && s.state === 'working'), "switching shows the other computer's sessions");
     const bgs = far.sessions.find(s => s.id === 'bbbbbbbb-bg');
@@ -201,7 +207,7 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   } catch (e) {
     check(false, e.message);
   } finally {
-    ha.kill(); hb.kill(); standIn.kill(); bg.kill();
+    ha.kill(); if (hb) hb.kill(); standIn.kill(); bg.kill();
     fs.rmSync(tmp2, { recursive: true, force: true });
   }
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed');
