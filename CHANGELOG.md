@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.5 (2026-10-24)
+
+### Fixed
+
+- **Progress updates show up again.** Newer Claude Code writes a reply that has no text as a progress update: written-out thinking marked `thinkingDisplay: "updates"`, which Claude Code and the Claude app show like a message. Hive skipped them, so a session that only sent updates looked silent. They now appear in "What it said" and reach the progress summary. Thinking that isn't marked as an update stays private.
+
 ## 0.4.4 (2026-10-24)
 
 ### Fixed

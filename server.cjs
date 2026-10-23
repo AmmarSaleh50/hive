@@ -208,7 +208,10 @@ function ingest(s, line) {
   if (o.type === 'assistant') {
     if (!Array.isArray(c)) return;
     const t = c.filter(b => b.type === 'text').map(b => b.text).join('\n\n').trim();
-    if (t) push(s, { role: 'agent', text: t, at, uuid: o.uuid });
+    // With thinkingDisplay "updates", a reply without text carries its progress update as written-out thinking, and
+    // Claude Code shows it to you like a message. Thinking that isn't marked that way stays private.
+    const upd = o.thinkingDisplay === 'updates' ? c.filter(b => b.type === 'thinking' && b.thinking).map(b => b.thinking).join('\n\n').trim() : '';
+    if (t || upd) push(s, { role: 'agent', text: t || upd, at, uuid: o.uuid });
     for (const b of c) {
       if (b.type !== 'tool_use') continue;
       s.pending = { id: b.id, name: b.name };
