@@ -84,12 +84,14 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   ].join('\n') + '\n');
   const cfg = path.join(tmp, 'hive.config.json');
   fs.writeFileSync(cfg, JSON.stringify({ claudeDir, dataDir: path.join(tmp, 'data'), summaries: { enabled: false }, tailscale: false,
-    routines: [{ name: 'Check', steps: [{ label: 'Say hi', run: 'node -e "process.exit(0)"' }, { label: 'Folder', open: tmp, cwd: tmp, unlessRunning: path.basename(process.execPath) }] }] }));
+    routines: [{ name: 'Check', steps: [{ label: 'Say hi', run: 'node -e "process.exit(0)"' }, { label: 'Node', open: process.execPath, args: ['-e', ''], cwd: tmp, unlessRunning: path.basename(process.execPath) }] },
+      { name: 'Broken', steps: [{ label: 'Bad app', open: path.join(tmp, 'no-such-app') }] }] }));
 
   // The command-line form: --dry-run only checks that every path in the routine exists.
   const cli = (...args) => new Promise(r => spawn(process.execPath, [path.join(root, 'server.cjs'), '--routine', ...args],
     { env: { ...process.env, PORT: String(PORT), HIVE_CONFIG: cfg }, stdio: 'ignore' }).on('close', r));
-  check(await cli('Check', '--dry-run') === 0 && await cli('Nope', '--dry-run') === 1, 'a routine can be checked from the command line');
+  check(await cli('Check', '--dry-run') === 0 && await cli('Broken', '--dry-run') === 1 && await cli('Nope', '--dry-run') === 1,
+    'a routine can be checked from the command line');
 
   const real = spawn(process.execPath, [path.join(root, 'server.cjs')], { env: { ...process.env, PORT: String(PORT), HIVE_CONFIG: cfg }, stdio: 'ignore' });
   try {
@@ -116,6 +118,11 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     let rt = {};
     for (let i = 0; i < 100 && !rt.doneAt; i++) { await new Promise(r => setTimeout(r, 100)); rt = JSON.parse((await get('/api/state')).body).routine; }
     check(rt.doneAt && !rt.error && rt.step === 2, `the routine runs to the end (${rt.error || rt.label})`);
+    await post('/api/routine', { name: 'Broken' });
+    rt = {};
+    for (let i = 0; i < 100 && !rt.doneAt; i++) { await new Promise(r => setTimeout(r, 100)); rt = JSON.parse((await get('/api/state')).body).routine; }
+    check(rt.name === 'Broken' && rt.error.startsWith('Bad app'), `an app that can't start stops the routine with a message (${rt.error})`);
+    check((await get('/api/ping')).status === 200, 'and Hive keeps running');
   } catch (e) {
     check(false, e.message);
   } finally {

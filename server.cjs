@@ -634,10 +634,12 @@ function openTab({ title, cwd, command }) {
     spawn('wt.exe', args, { detached: true, stdio: 'ignore', windowsHide: false }).on('error', e => console.log('Could not open Windows Terminal:', e.message)).unref();
   } else if (process.platform === 'darwin') {
     const script = `tell application "Terminal" to do script "cd ${JSON.stringify(dir).slice(1, -1)} && ${command.replace(/"/g, '\\"')}"`;
-    spawn('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { detached: true, stdio: 'ignore' }).unref();
+    spawn('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { detached: true, stdio: 'ignore' })
+      .on('error', e => console.log('Could not open Terminal:', e.message)).unref();
   } else {
     spawn('gnome-terminal', ['--tab', `--title=${title || 'Hive'}`, `--working-directory=${dir}`, '--', 'bash', '-lc', `${command}; exec bash`], { detached: true, stdio: 'ignore' })
-      .on('error', () => spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && ${command}; exec bash'`], { detached: true, stdio: 'ignore' }).unref()).unref();
+      .on('error', () => spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && ${command}; exec bash'`], { detached: true, stdio: 'ignore' })
+        .on('error', e => console.log('Could not open a terminal:', e.message)).unref()).unref();
   }
 }
 function resumeSession(id) {
@@ -664,6 +666,7 @@ function sh(cmd, timeoutMs = 120e3) {
 }
 async function isRunning(name) {
   if (!name) return false;
+  // (macOS pgrep leaves out its own parents, Hive among them; that's fine for the apps a routine opens.)
   const r = process.platform === 'win32' ? await sh(`tasklist /FI "IMAGENAME eq ${name.replace(/\.exe$/i, '')}.exe" /NH`, 15e3) : await sh(`pgrep -if "${name}"`, 15e3);
   return process.platform === 'win32' ? r.out.toLowerCase().includes(name.replace(/\.exe$/i, '').toLowerCase() + '.exe') : r.ok;
 }
@@ -675,9 +678,15 @@ async function openApp(step) {
     const q = s => `'${String(s).replace(/'/g, "''")}'`;
     const args = (step.args || []).length ? ` -ArgumentList ${(step.args).map(q).join(',')}` : '';
     const r = await sh(`powershell -NoProfile -Command "Start-Process -FilePath ${q(exe)} -WorkingDirectory ${q(cwd)}${args}"`, 60e3);
-    if (!r.ok) throw new Error(r.out || 'could not start');
+    if (!r.ok) throw new Error((r.out.split('\n')[0] || 'could not start').replace(/^Start-Process : /, '').trim());
   } else {
-    spawn(exe, step.args || [], { cwd, detached: true, stdio: 'ignore' }).unref();
+    // macOS apps are folders (Foo.app) that `open -a` starts; anything else is run directly.
+    const [bin, args] = process.platform === 'darwin' && /\.app\/?$/.test(exe)
+      ? ['open', ['-a', exe, ...((step.args || []).length ? ['--args', ...step.args] : [])]] : [exe, step.args || []];
+    await new Promise((resolve, reject) => {
+      const child = spawn(bin, args, { cwd, detached: true, stdio: 'ignore' });
+      child.on('error', reject).on('spawn', () => { child.unref(); resolve(); });
+    });
   }
   return 'started';
 }
@@ -698,7 +707,7 @@ async function runRoutine(name, { dryRun = false, log = () => {} } = {}) {
         if (p && !fs.existsSync(p)) throw new Error(`${label}: not found: ${p}`);
         continue;
       }
-      if (step.open) log('   ' + await openApp(step));
+      if (step.open) log('   ' + await openApp(step).catch(e => { throw new Error(`${label}: ${e.message}`); }));
       else if (step.run) { const x = await sh(step.run, (step.timeout || 120) * 1e3); if (!x.ok) throw new Error(`${label}: ${x.out.split('\n').pop()}`); }
       else if (step.waitFor) {
         const until = Date.now() + (step.timeout || 120) * 1e3;
