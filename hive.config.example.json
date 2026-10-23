@@ -18,7 +18,7 @@
   "resume": {
     "days": 14,
     "command": "claude --resume {id}",
-    "window": "hive"
+    "window": "0"
   },
   "routines": [
     {

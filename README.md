@@ -45,7 +45,7 @@ Hive is one page that answers that at a glance.
 
 <p align="center"><img src="docs/screenshots/briefing.png" alt="A briefing: headline, numbers, facts, next step" width="560" /></p>
 
-**Resume with one click.** The **Resume** tab lists your sessions from the last two weeks by project, with your last prompt. Press **Resume** and the session opens in a new tab of one shared terminal window, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back.
+**Resume with one click.** The **Resume** tab lists your sessions from the last two weeks by project, with your last prompt. Press **Resume** and the session opens as a new tab in the terminal window you already have open, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back.
 
 **Routines for the start of your day.** One button that starts everything you open before work: Docker and its containers, your dev servers (each in its own terminal tab), the apps you need. Also works from a desktop shortcut. See [Resume and routines](#resume-and-routines).
 
@@ -108,13 +108,13 @@ Now `https://<this-computer>.<your-tailnet>.ts.net` opens Hive on any device sig
 
 Both start things on your computer, so they only show up on the computer Hive runs on, never on your phone or other devices.
 
-**Resume** opens each session with `claude --resume <id>` in a tab of one terminal window called `hive`, so every session you resume lands next to the others. Sessions that are still running say so instead. To add your own flags:
+**Resume** opens each session with `claude --resume <id>` in a new tab of the terminal window you used last, so every session you resume lands next to your others. Sessions that are still running say so instead. To add your own flags:
 
 ```json
 "resume": { "command": "claude --resume {id} --dangerously-skip-permissions" }
 ```
 
-On Windows it uses Windows Terminal and PowerShell, on macOS Terminal, on Linux GNOME Terminal.
+On Windows it uses Windows Terminal with PowerShell 7 (or Windows PowerShell when 7 isn't installed), on macOS Terminal, on Linux GNOME Terminal. To give resumed sessions a window of their own instead, set `"window": "hive"`.
 
 **Routines** are lists of steps under one button. A step can open an app, run a command, wait until a command succeeds, or open a terminal tab:
 
@@ -136,7 +136,7 @@ On Windows it uses Windows Terminal and PowerShell, on macOS Terminal, on Linux 
 | `open`, with optional `args`, `cwd`, `unlessRunning` | Starts an app. Skipped when a process called `unlessRunning` is already running. |
 | `run`, with optional `timeout` (seconds) | Runs a command and waits for it. The routine stops if it fails. |
 | `waitFor`, with optional `timeout` (seconds) | Retries a command every 3 seconds until it succeeds. |
-| `tab`: `{ title, cwd, command }` | Opens a tab in the `hive` terminal window. |
+| `tab`: `{ title, cwd, command }` | Opens a terminal tab, next to your resumed sessions. |
 
 `icon` is any [Lucide](https://lucide.dev/icons) icon name. Hive shows which step a routine is on and where it stopped if something failed.
 
@@ -180,7 +180,7 @@ Copy `hive.config.example.json` to `hive.config.json` and change what you need. 
 | `dataDir` | `./data` | Where Hive keeps its own files |
 | `resume.days` | `14` | How far back the Resume list goes |
 | `resume.command` | `claude --resume {id}` | Command a resumed session runs |
-| `resume.window` | `hive` | Name of the terminal window resumed sessions share (Windows Terminal) |
+| `resume.window` | `0` | Windows Terminal window for new tabs: `0` is the one you used last, a name like `hive` gives them their own |
 | `routines` | `[]` | Your routine buttons, see [Resume and routines](#resume-and-routines) |
 
 ## Privacy and cost

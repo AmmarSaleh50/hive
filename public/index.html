@@ -647,7 +647,7 @@ async function load() {
   drawIcons();
 }
 
-// ---- Resume: reopen sessions in tabs of one terminal window, and run your routines ----
+// ---- Resume: reopen sessions as tabs of your terminal, and run your routines ----
 function ago(t) {
   const s = Math.max(0, (Date.now() - t) / 1000);
   return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
@@ -722,7 +722,7 @@ document.addEventListener('click', e => {
   const rs = e.target.closest('[data-resume]');
   if (rs) {
     rs.disabled = true;
-    return post('/api/resume', { id: rs.dataset.resume }).then(r => { toast(r.ok ? 'Opened in your Hive terminal window' : r.error); setTimeout(refresh, 1500); });
+    return post('/api/resume', { id: rs.dataset.resume }).then(r => { toast(r.ok ? 'Opened in a new terminal tab' : r.error); setTimeout(refresh, 1500); });
   }
   const rb = e.target.closest('[data-routine]');
   if (rb) {

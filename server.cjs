@@ -20,8 +20,9 @@ const DEFAULTS = {
   clips: [],           // folders of your own videos for the Stimulation player: [{ "path": "~/Videos/Clips", "label": "Gameplay" }]
   tailscale: true,     // also answer to this machine's Tailscale name (for `tailscale serve`)
   dataDir: './data',   // where Hive keeps its progress cache and Haiku usage log
-  // The Resume list: sessions from the last `days`, reopened with `command` in a tab of one terminal window.
-  resume: { days: 14, command: 'claude --resume {id}', window: 'hive' },
+  // The Resume list: sessions from the last `days`, reopened with `command` in a new terminal tab. `window` (Windows
+  // Terminal): "0" = the window you used last, or a name such as "hive" to give resumed sessions a window of their own.
+  resume: { days: 14, command: 'claude --resume {id}', window: '0' },
   // Buttons that start your day: [{ "name": "Work", "icon": "briefcase", "steps": [...] }]; see hive.config.example.json.
   routines: [],
 };
@@ -622,11 +623,19 @@ function recentSessions() {
 
 // A tab in one shared terminal window, so every session you resume lands next to the others.
 const fill = (cmd, vars) => cmd.replace(/\{(\w+)\}/g, (m, k) => vars[k] !== undefined ? vars[k] : m);
+// PowerShell 7 when it's installed, else the built-in Windows PowerShell. pwsh usually sits behind a Store
+// app alias that Node's fs can't see, so ask `where` like a shell would.
+let winShell = '';
+function windowsShell() {
+  if (!winShell) try { execFileSync('where.exe', ['pwsh'], { stdio: 'ignore', windowsHide: true }); winShell = 'pwsh'; } catch { winShell = 'powershell'; }
+  return winShell;
+}
 function openTab({ title, cwd, command }) {
   const dir = home(cwd || os.homedir());
   if (process.platform === 'win32') {
-    const shell = fs.existsSync(path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WindowsApps', 'pwsh.exe')) ? 'pwsh' : 'powershell';
-    // `wt -w <name>` reuses the window with that name. The command goes in encoded, because quotes and ";"
+    const shell = windowsShell();
+    // `wt -w 0` adds the tab to the terminal window you used last (a name instead keeps a window of its own).
+    // The command goes in encoded, because quotes and ";"
     // would otherwise be read by wt.exe itself before PowerShell ever sees them.
     const lit = s => s.replace(/;/g, '\\;'); // a bare ";" would start a new wt command
     const args = ['-w', config.resume.window, 'new-tab', '--title', lit(title || 'Hive'), '-d', lit(dir),
