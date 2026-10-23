@@ -3,6 +3,17 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 (2026-10-23)
+
+### Added
+
+- **Two computers, one switch.** With `peers` set, a switch at the top shows one computer's sessions at a time, through that computer's own Hive. A computer that's off shows as off.
+- **End session** stops a session for good: background sessions with `claude stop`, interactive ones by ending the process. It asks once more first.
+- **Background sessions** (`claude --bg`) show up on the board, with their state.
+- **Use it from your phone too** with `"launchFrom": "my-devices"`: your own Tailscale devices may resume, end and run things. Resuming from elsewhere starts the session in the background (`resume.background`), for Remote Control.
+- **Transfer button** (`sync`): runs your copy command and shows its last result.
+- A Hive without clips plays the clips of another computer's Hive.
+
 ## 0.3.2 (2026-10-23)
 
 ### Fixed

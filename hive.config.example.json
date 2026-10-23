@@ -15,9 +15,15 @@
   ],
   "tailscale": true,
   "dataDir": "./data",
+  "machine": "desktop",
+  "peers": [
+    { "name": "laptop", "url": "https://laptop.your-tailnet.ts.net" }
+  ],
+  "launchFrom": "this-computer",
   "resume": {
     "days": 14,
     "command": "claude --resume {id}",
+    "background": "claude --bg --resume {id}",
     "window": "0"
   },
   "routines": [

@@ -129,6 +129,62 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     real.kill();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+
+  // Two computers: "4070" switches to "2060", which has a running session (a stand-in process) and a background one.
+  const A = 4797, B = 4798, at = port => (p, host = 'localhost') => new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port, path: p, headers: { host } }, res => { let b = ''; res.on('data', d => b += d); res.on('end', () => resolve({ status: res.statusCode, body: b })); }).on('error', reject);
+  });
+  const postAt = (port, p, body, headers = {}) => new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    http.request({ host: '127.0.0.1', port, path: p, method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json', 'x-hive': '1', 'content-length': Buffer.byteLength(data), ...headers } },
+      res => { let b = ''; res.on('data', d => b += d); res.on('end', () => resolve({ status: res.statusCode, body: b })); }).on('error', reject).end(data);
+  });
+  const getA = at(A), getB = at(B);
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'hive-test-'));
+  const standIn = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120e3)'], { stdio: 'ignore' });
+  const bg = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120e3)'], { stdio: 'ignore' });
+  const dirB = path.join(tmp2, 'b'), projB = path.join(dirB, 'projects', '-far-away');
+  for (const d of [path.join(dirB, 'sessions'), projB, path.join(dirB, 'daemon'), path.join(dirB, 'jobs', 'bbbbbbbb')]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(dirB, 'sessions', `${standIn.pid}.json`), JSON.stringify({ pid: standIn.pid, sessionId: 'far-session', cwd: '/far/away', name: 'far', status: 'busy', startedAt: Date.now() }));
+  fs.writeFileSync(path.join(dirB, 'daemon', 'roster.json'), JSON.stringify({ supervisorPid: bg.pid, workers: { bbbbbbbb: { pid: bg.pid, sessionId: 'bbbbbbbb-bg', cwd: '/far/away' } } }));
+  fs.writeFileSync(path.join(dirB, 'jobs', 'bbbbbbbb', 'state.json'), JSON.stringify({ state: 'blocked', tempo: 'blocked', needs: 'approve a command', name: 'deploy' }));
+  for (const id of ['far-session', 'bbbbbbbb-bg']) fs.writeFileSync(path.join(projB, id + '.jsonl'),
+    JSON.stringify({ uuid: id + '1', parentUuid: null, type: 'user', cwd: '/far/away', timestamp: new Date().toISOString(), message: { role: 'user', content: 'Ship it' } }) + '\n');
+  const cfgA = path.join(tmp2, 'a.json'), cfgB = path.join(tmp2, 'b.json');
+  fs.writeFileSync(cfgB, JSON.stringify({ machine: '2060', claudeDir: dirB, dataDir: path.join(tmp2, 'db'), summaries: { enabled: false }, tailscale: false, launchFrom: 'my-devices' }));
+  fs.writeFileSync(cfgA, JSON.stringify({ machine: '4070', claudeDir: path.join(tmp2, 'a'), dataDir: path.join(tmp2, 'da'), summaries: { enabled: false }, tailscale: false,
+    peers: [{ name: '2060', url: `http://localhost:${B}` }] }));
+  const start = (cfg, port) => spawn(process.execPath, [path.join(root, 'server.cjs')], { env: { ...process.env, PORT: String(port), HIVE_CONFIG: cfg }, stdio: 'ignore' });
+  let hb = start(cfgB, B);
+  const ha = start(cfgA, A);
+  try {
+    for (let i = 0; i < 50; i++) { try { await getA('/api/ping'); await getB('/api/ping'); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    await new Promise(r => setTimeout(r, 1500));
+    let sa = JSON.parse((await getA('/api/state')).body);
+    check(sa.machine === '4070' && sa.machines.map(x => x.name + (x.online ? '' : ' off')).join(',') === '2060,4070', `the switch lists both computers (${sa.machines.map(x => x.name).join(',')})`);
+    const far = JSON.parse((await getA('/api/state?m=2060')).body);
+    check(far.view === '2060' && far.sessions.some(s => s.id === 'far-session' && s.state === 'working'), "switching shows the other computer's sessions");
+    const bgs = far.sessions.find(s => s.id === 'bbbbbbbb-bg');
+    check(bgs && bgs.background && bgs.state === 'waiting' && bgs.name === 'deploy', 'background sessions show, blocked ones as needing you');
+    check(JSON.parse((await getA('/api/session/far-session?m=2060')).body).msgs.some(x => x.text === 'Ship it'), "its session pages open from here");
+    check(JSON.parse((await getA('/api/recent?m=2060')).body).some(s => s.id === 'far-session' && s.running), 'and its Resume list');
+    check((await getA('/api/state?m=nowhere')).status === 404, 'an unknown computer is 404');
+    check((await postAt(B, '/api/end', { id: 'far-session' }, { 'x-forwarded-for': '100.64.0.9', 'tailscale-user-login': 'someone@example.com' })).status === 403,
+      'a made-up Tailscale identity is not one of your devices');
+    const ended = JSON.parse((await postAt(A, '/api/end?m=2060', { id: 'far-session' })).body);
+    await new Promise(r => setTimeout(r, 1500));
+    check(ended.ok && (standIn.exitCode !== null || standIn.signalCode !== null), `End session ends it on the other computer (${ended.error || 'ok'})`);
+    hb.kill();
+    let off = false;
+    for (let i = 0; i < 30 && !off; i++) { await new Promise(r => setTimeout(r, 500)); off = JSON.parse((await getA('/api/state?m=2060')).body).offline === true; }
+    sa = JSON.parse((await getA('/api/state')).body);
+    check(off && sa.machines.find(x => x.name === '2060').online === false, 'a computer that goes off shows as off');
+  } catch (e) {
+    check(false, e.message);
+  } finally {
+    ha.kill(); hb.kill(); standIn.kill(); bg.kill();
+    fs.rmSync(tmp2, { recursive: true, force: true });
+  }
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed');
   process.exit(failed ? 1 : 0);
 })();

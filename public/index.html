@@ -134,6 +134,15 @@ nav button.on { border-color: var(--fg); }
 .rs-btn:disabled { cursor: default; border-color: var(--fg); }
 .rs-on { min-width: 104px; text-align: center; font-size: 13px; font-weight: 600; color: var(--honey); }
 .vbtns { display: flex; gap: 8px; flex: none; }
+.end-btn.arm { border-color: var(--red); color: var(--red); }
+.rt-status .bad { color: var(--red); }
+/* The computer switch: which laptop's sessions you're looking at */
+.msw { display: flex; gap: 2px; padding: 3px; margin-left: 14px; border: 1px solid var(--edge); border-radius: 999px; }
+.msw[hidden] { display: none; }
+.msw button { font: 600 14px/1 var(--mono); padding: 6px 14px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; }
+.msw button.on { background: var(--fg); color: var(--bg); }
+.msw em { font: 600 10px/1 var(--body); font-style: normal; letter-spacing: .1em; text-transform: uppercase; color: var(--red); }
+.msw button.on em { color: var(--bg); }
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60; background: var(--wax); border: 1px solid var(--edge);
   border-radius: 12px; padding: 10px 18px; font-size: 14px; font-weight: 500; max-width: calc(100vw - 32px); }
 
@@ -324,7 +333,9 @@ nav button.stimbtn.on { border-color: var(--honey); }
 .navicon { display: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: -4px; }
 @media (max-width: 600px) {
   body { padding-top: 14px; }
-  header { margin-bottom: 22px; gap: 10px; }
+  header { margin-bottom: 22px; gap: 10px; flex-wrap: wrap; }
+  .msw { order: 3; width: 100%; margin: 4px 0 0; }
+  .msw button { flex: 1; justify-content: center; padding: 9px 14px; }
   .brand span { font-size: 19px; }
   nav { gap: 16px; }
   nav .stimbtn .navlabel { display: none; }
@@ -362,6 +373,7 @@ nav button.stimbtn.on { border-color: var(--honey); }
 <div class="wrap">
   <header>
     <button class="brand" type="button" data-go=""><img src="/logo.svg" alt=""><span>hive</span><em class="demo-tag" id="demo-tag" hidden>demo</em></button>
+    <div class="msw" id="msw" role="tablist" aria-label="Computer" hidden></div>
     <nav>
       <button id="tab-board" class="on" type="button" data-go="">Progress</button>
       <button id="tab-resume" type="button" data-go="resume" hidden>Resume</button>
@@ -606,8 +618,8 @@ function renderSession(d) {
   const hist = p && p.history && p.history.length ? `<h2>Earlier in this session</h2><div class="earlier">${p.history.map((h, i) => `<div${h.done >= h.total ? ' class="full"' : ''}><span class="node">${hex(h.icon, h.done >= h.total ? 'done' : 'todo')}</span><span>${esc(h.goal)}</span><b>${h.done} of ${h.total}</b>${sumBtn(s, i)}</div>`).join('')}</div>` : '';
   return `<div class="view ${cls}">
     <button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button>
-    <div class="vtitle"><h1 class="vname">${tag(s.id)}<span>${esc(s.name)}</span></h1><div class="vbtns">${s.state === 'closed' && lastState.canLaunch
-      ? `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>` : ''}${sumBtn(s)}</div></div>
+    <div class="vtitle"><h1 class="vname">${tag(s.id)}<span>${esc(s.name)}</span></h1><div class="vbtns">${!lastState.canLaunch ? ''
+      : s.state === 'closed' ? `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>` : endBtn(s)}${sumBtn(s)}</div></div>
     <div class="status ${cls}">${status}${s.project ? ` in ${esc(s.project)}` : ''}</div>
     ${p ? `<div class="goal">${hex(p.icon)}<span>${esc(p.goal)}</span></div>
       <div class="score"><div class="pct">${p.pct}%</div>${comb(p)}</div>
@@ -620,27 +632,55 @@ function renderSession(d) {
   </div>`;
 }
 
+// ---- Which computer you're looking at (the switch in the header) ----
+let machineShown = '';
+try { machineShown = localStorage.getItem('hive.machine') || ''; } catch {}
+const q = () => machineShown ? `?m=${encodeURIComponent(machineShown)}` : '';
+let events = null;
+function listen() {
+  if (events) events.close();
+  events = new EventSource('/events' + q());
+  events.onmessage = refresh;
+}
+function pick(name) {
+  machineShown = name;
+  try { localStorage.setItem('hive.machine', name); } catch {}
+  listen();
+  if (location.hash.startsWith('#s/')) location.hash = ''; // its sessions are another computer's
+  refresh();
+}
+function renderSwitch(state) {
+  const box = document.getElementById('msw'), ms = state.machines || [];
+  box.hidden = ms.length < 2;
+  box.innerHTML = ms.map(x => `<button type="button" role="tab" aria-selected="${x.name === state.view}" data-machine="${esc(x.name)}"${x.name === state.view ? ' class="on"' : ''}>${esc(x.name)}${x.online ? '' : '<em>off</em>'}</button>`).join('');
+}
+
 async function load() {
   const r = location.hash.slice(1);
   if (r !== route) { route = r; limit = 6; window.scrollTo(0, 0); }
-  const state = await (await fetch('/api/state')).json();
+  const got = await fetch('/api/state' + q());
+  if (got.status === 404 && machineShown) { pick(''); return; } // a computer this Hive doesn't know (any more)
+  const state = await got.json();
   lastState = state;
+  renderSwitch(state);
   document.getElementById('demo-tag').hidden = !state.demo;
   secureUrl = state.secure || '';
   if (!triedSecure) goSecure();
   if (dlg.open) fillSummary();
   const waiting = state.sessions.filter(s => s.state === 'waiting').length;
   document.title = waiting ? `(${waiting}) Hive` : 'Hive';
-  // The Resume tab launches things on this computer, so it only shows here (not on the phone).
+  // The Resume tab starts things, so it only shows where you may: this computer, and your own devices if allowed.
   const tabResume = document.getElementById('tab-resume');
   tabResume.hidden = !state.canLaunch;
   document.getElementById('tab-board').classList.toggle('on', r !== 'resume');
   tabResume.classList.toggle('on', r === 'resume');
-  if (r.startsWith('s/')) {
-    const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)));
+  if (state.offline) {
+    app.innerHTML = `<div class="quiet"><img src="/logo.svg" alt=""><b>The ${esc(state.view)} is off.</b><span>Its sessions show up here as soon as it's on again.</span></div>`;
+  } else if (r.startsWith('s/')) {
+    const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)) + q());
     app.innerHTML = res.ok ? renderSession(await res.json()) : '<div class="view"><button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button><div class="nowline">That session has left the hive.</div></div>';
   } else if (r === 'resume' && state.canLaunch) {
-    app.innerHTML = renderResume(state, await (await fetch('/api/recent')).json());
+    app.innerHTML = renderResume(state, await (await fetch('/api/recent' + q())).json());
   } else {
     app.innerHTML = renderBoard(state);
   }
@@ -668,10 +708,27 @@ function renderResume(state, recent) {
     ${items.slice(0, openProjects.has(project) ? items.length : 5).map(s => `<div class="rs-row">
       <div class="rs-main"><div class="name">${tag(s.id)}<span>${esc(s.name)}</span></div><div class="rs-last">${esc(s.last)}</div></div>
       <span class="rs-when">${ago(s.lastAt)}</span>
-      ${s.running ? '<span class="rs-on">Running</span>' : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
+      ${s.running ? endBtn(state.sessions.find(x => x.id === s.id) || { id: s.id }) : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
         : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
     </div>`).join('')}${items.length > 5 ? `<button class="more" type="button" data-project="${esc(project)}">${openProjects.has(project) ? 'Show fewer' : `Show ${items.length - 5} more`}</button>` : ''}</section>`).join('');
-  return routines + (list || '<div class="quiet"><img src="/logo.svg" alt=""><b>No sessions in the last two weeks.</b></div>');
+  return syncCard(state.sync) + routines + (list || '<div class="quiet"><img src="/logo.svg" alt=""><b>No sessions in the last two weeks.</b></div>');
+}
+// Ending is for good, so it takes a second press (see the click handler).
+let armed = ''; // the session whose End button waits for its second press
+const endBtn = s => `<button class="sumbtn rs-btn end-btn${armed === s.id ? ' arm' : ''}" type="button" data-end="${esc(s.id)}">${ic('square')}<span>${
+  armed !== s.id ? 'End session' : s.state === 'working' ? "It's working. End anyway?" : 'End it for good?'}</span></button>`;
+// The transfer's status file: running, startedAt, finishedAt, result (ok, partial, error), counts, errors, error.
+function syncCard(sy) {
+  if (!sy) return '';
+  const st = sy.status || {}, c = st.counts || {}, at = Date.parse(st.finishedAt) || 0;
+  const moved = [c.pushed && `${c.pushed} sent`, c.pulled && `${c.pulled} brought back`].filter(Boolean).join(', ') || 'nothing to move';
+  const line = sy.running ? `Transferring now${st.startedAt ? `, started ${ago(Date.parse(st.startedAt))}` : ''}.`
+    : sy.error || st.result === 'error' ? `<span class="bad">Last transfer failed${at ? ` ${ago(at)}` : ''}: ${esc(sy.error || st.error || 'unknown error')}</span>`
+    : at ? `Last transfer ${ago(at)}: ${moved}${st.result === 'partial' ? `, <span class="bad">${(st.errors || []).length} problem${(st.errors || []).length === 1 ? '' : 's'}</span>` : ''}.`
+    : 'No transfer yet.';
+  return `<section class="group"><div class="label">Transfer</div>
+    <div class="rt-row"><button class="rt-btn" type="button" data-sync${sy.running ? ' disabled' : ''}>${ic('refresh-cw')}<span>${esc(sy.label)}</span></button></div>
+    <div class="rt-status">${line}</div></section>`;
 }
 async function post(url, body) {
   try {
@@ -719,15 +776,38 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-earlier]')) { limit += 6; return refresh(); }
   const pj = e.target.closest('[data-project]');
   if (pj) { const k = pj.dataset.project; openProjects.has(k) ? openProjects.delete(k) : openProjects.add(k); return refresh(); }
+  const mb = e.target.closest('[data-machine]');
+  if (mb) return pick(mb.dataset.machine);
   const rs = e.target.closest('[data-resume]');
   if (rs) {
     rs.disabled = true;
-    return post('/api/resume', { id: rs.dataset.resume }).then(r => { toast(r.ok ? 'Opened in a new terminal tab' : r.error); setTimeout(refresh, 1500); });
+    // At this screen it opens in a terminal tab; anywhere else it starts in the background, for Remote Control.
+    const away = lastState.view !== lastState.machine || !lastState.here;
+    return post('/api/resume' + q(), { id: rs.dataset.resume }).then(r => {
+      toast(!r.ok ? r.error : away ? `Started in the background on the ${lastState.view}. Open it with Remote Control.` : 'Opened in a new terminal tab');
+      setTimeout(refresh, 1500);
+    });
+  }
+  const eb = e.target.closest('[data-end]');
+  if (eb) {
+    clearTimeout(endBtn.timer);
+    if (armed !== eb.dataset.end) { // first press: ask
+      armed = eb.dataset.end;
+      endBtn.timer = setTimeout(() => { armed = ''; refresh(); }, 5000);
+      return refresh();
+    }
+    armed = ''; eb.disabled = true;
+    return post('/api/end' + q(), { id: eb.dataset.end }).then(r => { toast(r.ok ? 'Session ended' : r.error); setTimeout(refresh, 800); });
+  }
+  const sy = e.target.closest('[data-sync]');
+  if (sy) {
+    sy.disabled = true;
+    return post('/api/sync' + q(), {}).then(r => { if (!r.ok) toast(r.error); refresh(); });
   }
   const rb = e.target.closest('[data-routine]');
   if (rb) {
     rb.disabled = true;
-    return post('/api/routine', { name: rb.dataset.routine }).then(r => { if (!r.ok) toast(r.error); refresh(); });
+    return post('/api/routine' + q(), { name: rb.dataset.routine }).then(r => { if (!r.ok) toast(r.error); refresh(); });
   }
   const sb = e.target.closest('[data-summary]');
   if (sb) return openSummary(sb.dataset.summary, sb.dataset.hist !== undefined ? +sb.dataset.hist : undefined);
@@ -997,7 +1077,7 @@ document.querySelectorAll('[data-grip]').forEach(g => g.addEventListener('pointe
 addEventListener('resize', () => { if (!stim.hidden) place(); });
 if (store.get('open', false)) toggleStim(true);
 
-new EventSource('/events').onmessage = refresh;
+listen();
 setInterval(refresh, 30000);
 refresh();
 </script>

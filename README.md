@@ -45,7 +45,9 @@ Hive is one page that answers that at a glance.
 
 <p align="center"><img src="docs/screenshots/briefing.png" alt="A briefing: headline, numbers, facts, next step" width="560" /></p>
 
-**Resume with one click.** The **Resume** tab lists your sessions from the last two weeks by project, with your last prompt. Press **Resume** and the session opens as a new tab in the terminal window you already have open, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back.
+**Resume with one click.** The **Resume** tab lists your sessions from the last two weeks by project, with your last prompt. Press **Resume** and the session opens as a new tab in the terminal window you already have open, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back. **End session** stops a session for good, also one you started from your phone.
+
+**Two computers, one switch.** Run Hive on both and a switch at the top shows one computer's sessions at a time. One that's off says so. Resume and End act on the computer you're looking at. See [Two computers](#two-computers).
 
 **Routines for the start of your day.** One button that starts everything you open before work: Docker and its containers, your dev servers (each in its own terminal tab), the apps you need. Also works from a desktop shortcut. See [Resume and routines](#resume-and-routines).
 
@@ -106,7 +108,7 @@ Now `https://<this-computer>.<your-tailnet>.ts.net` opens Hive on any device sig
 
 ## Resume and routines
 
-Both start things on your computer, so they only show up on the computer Hive runs on, never on your phone or other devices.
+Both start things on your computer, so by default they only show up on the computer Hive runs on. To use them from your phone too, see [Two computers](#two-computers).
 
 **Resume** opens each session with `claude --resume <id>` in a new tab of the terminal window you used last, so every session you resume lands next to your others. Sessions that are still running say so instead. To add your own flags:
 
@@ -140,7 +142,29 @@ On Windows it uses Windows Terminal with PowerShell 7 (or Windows PowerShell whe
 
 `icon` is any [Lucide](https://lucide.dev/icons) icon name. Hive shows which step a routine is on and where it stopped if something failed.
 
+**End session** (on a running session's page and in the Resume list) asks once more, then stops it: a background session with `claude stop`, an interactive one by ending its process. The conversation stays, so you can resume it later.
+
 **From a desktop shortcut:** `node /path/to/hive/server.cjs --routine Work` hands the routine to the running Hive (so the page shows its progress), or runs it by itself when Hive isn't running. Add `--dry-run` to only check that every app and folder in it exists.
+
+## Two computers
+
+Run Hive on each computer and tell each about the other. Each reads its own sessions; the switch at the top asks the other Hive over Tailscale.
+
+```json
+"machine": "desktop",
+"peers": [{ "name": "laptop", "url": "https://laptop.your-tailnet.ts.net" }],
+"launchFrom": "my-devices"
+```
+
+With `"launchFrom": "my-devices"` your own devices may resume, end and run things too, for example from your phone while you're away. Nobody is at that computer's screen then, so a session you resume from elsewhere starts in the background (`resume.background`, by default `claude --bg --resume {id}`), where [Remote Control](https://code.claude.com/docs/en/remote-control) reaches it. "Your own devices" means requests through `tailscale serve` whose Tailscale identity is this computer's owner, from an address that belongs to one of that owner's devices. Other people on your tailnet and the internet still can't start anything.
+
+**A transfer button** (optional) runs your own copy or sync command and shows its last result from a status file:
+
+```json
+"sync": { "label": "Transfer now", "command": "node sync.cjs now", "status": "~/sync/status.json" }
+```
+
+The status file can hold `running`, `startedAt`, `finishedAt`, `result` (`ok`, `partial` or `error`), `counts` (`pushed`, `pulled`), `errors` and `error`.
 
 ## How it works
 
@@ -180,15 +204,20 @@ Copy `hive.config.example.json` to `hive.config.json` and change what you need. 
 | `dataDir` | `./data` | Where Hive keeps its own files |
 | `resume.days` | `14` | How far back the Resume list goes |
 | `resume.command` | `claude --resume {id}` | Command a resumed session runs |
+| `resume.background` | `claude --bg --resume {id}` | Command for resuming from another of your devices |
 | `resume.window` | `0` | Windows Terminal window for new tabs: `0` is the one you used last, a name like `hive` gives them their own |
 | `routines` | `[]` | Your routine buttons, see [Resume and routines](#resume-and-routines) |
+| `machine` | host name | This computer's name in the switch |
+| `peers` | `[]` | Other computers' Hives: `[{ "name": "2060", "url": "https://...ts.net" }]` |
+| `launchFrom` | `this-computer` | `my-devices` lets your own Tailscale devices resume, end and run things |
+| `sync` | none | A transfer button: `{ "label", "command", "status" }` |
 
 ## Privacy and cost
 
 - **What leaves your machine:** only the summaries. The recent chat text of a session (never its tool calls or files) goes to Claude Haiku through your own `claude` login, the same way your sessions talk to Claude. Turn it off with `"summaries": { "enabled": false }`.
 - **What it costs:** one update is about 9,000 tokens in and 1,300 out, roughly $0.0025 at API list prices. With a Claude subscription it counts toward your normal usage limits; next to an active Opus session it's around half a percent. `data/usage.jsonl` records every run so you can check.
 - **Who can open it:** only you. Hive listens on loopback, refuses requests for any other host name (so other websites can't reach it), and is only visible to your other devices if you publish it with `tailscale serve`.
-- **Who can start things:** only this computer. Resume and routines run only commands from your own settings file, only for requests from this computer (not from other devices on your tailnet), and only for requests carrying Hive's own header, which other websites can't send.
+- **Who can start things:** this computer, and with `"launchFrom": "my-devices"` your own Tailscale devices. Resume, End, routines and the transfer run only commands from your own settings file, never for other people on your tailnet or the internet, and only for requests carrying Hive's own header, which other websites can't send.
 
 ## Good to know
 

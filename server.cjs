@@ -5,7 +5,7 @@
 // Each session's progress (goal, steps, what it's doing now, a briefing) is written by Haiku from its messages.
 // No dependencies: Node 18+ and the `claude` CLI.
 const http = require('http'), fs = require('fs'), path = require('path'), os = require('os');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 
 // ---- Settings: defaults, overridden by hive.config.json (see hive.config.example.json) ----------
 const ROOT = __dirname;
@@ -22,9 +22,14 @@ const DEFAULTS = {
   dataDir: './data',   // where Hive keeps its progress cache and Haiku usage log
   // The Resume list: sessions from the last `days`, reopened with `command` in a new terminal tab. `window` (Windows
   // Terminal): "0" = the window you used last, or a name such as "hive" to give resumed sessions a window of their own.
-  resume: { days: 14, command: 'claude --resume {id}', window: '0' },
+  // `background` is used when you resume from another of your devices (your phone): nobody is at this screen then.
+  resume: { days: 14, command: 'claude --resume {id}', background: 'claude --bg --resume {id}', window: '0' },
   // Buttons that start your day: [{ "name": "Work", "icon": "briefcase", "steps": [...] }]; see hive.config.example.json.
   routines: [],
+  machine: '',         // this computer's name in the laptop switch (empty: its host name)
+  peers: [],           // other computers' Hives to switch to: [{ "name": "laptop", "url": "https://laptop.<tailnet>.ts.net" }]
+  launchFrom: 'this-computer', // or "my-devices": your own devices on Tailscale may resume, end and run things too
+  sync: null,          // a transfer button: { "label": "Transfer now", "command": "...", "status": "path/to/status.json" }
 };
 function loadConfig() {
   const file = process.env.HIVE_CONFIG || path.join(ROOT, 'hive.config.json');
@@ -37,6 +42,7 @@ function loadConfig() {
 }
 const config = loadConfig();
 const DEMO = process.argv.includes('--demo') || process.env.HIVE_DEMO === '1';
+const MACHINE = String(config.machine || os.hostname());
 
 const CLAUDE = home(config.claudeDir);
 const REG = path.join(CLAUDE, 'sessions'), PROJ = path.join(CLAUDE, 'projects'), TASKS = path.join(CLAUDE, 'tasks');
@@ -91,18 +97,41 @@ function session(id) {
   return s;
 }
 
+// Background sessions (`claude --bg`) aren't in that registry: the background service lists its live ones in
+// daemon/roster.json, and each keeps its state in jobs/<short id>/state.json.
+function readBackground() {
+  let roster;
+  try { roster = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'daemon', 'roster.json'), 'utf8')); } catch { return []; }
+  if (!roster.supervisorPid || !alive(roster.supervisorPid)) return [];
+  const out = [];
+  for (const [short, w] of Object.entries(roster.workers || {})) {
+    if (!w || !w.sessionId || !w.pid || !alive(w.pid)) continue;
+    let j = {};
+    try { j = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'jobs', short, 'state.json'), 'utf8')); } catch {}
+    // Its states are working, blocked and done. One waiting for its first prompt is idle, not blocked on you.
+    const status = /send a prompt/i.test(j.needs || j.detail || '') || j.state === 'done' || j.tempo === 'idle' ? 'idle'
+      : j.state === 'blocked' || j.tempo === 'blocked' ? 'waiting' : 'busy';
+    out.push({ sessionId: w.sessionId, short, pid: w.pid, cwd: w.cwd || j.cwd || '', name: j.name || '', kind: 'background', status,
+      startedAt: w.startedAt || 0, statusUpdatedAt: Date.parse(j.updatedAt) || 0 });
+  }
+  return out;
+}
+
 // Running sessions come from Claude Code's own registry: ~/.claude/sessions/<pid>.json
 function scanRegistry() {
   let changed = false;
-  const seen = new Set();
+  const seen = new Set(), entries = [];
   for (const f of safeDir(REG)) {
     if (!f.endsWith('.json')) continue;
     let r;
     try { r = JSON.parse(fs.readFileSync(path.join(REG, f), 'utf8')); } catch { continue; }
-    if (!r.sessionId || ownPids.has(r.pid) || !alive(r.pid)) continue;
+    if (r.sessionId && !ownPids.has(r.pid) && alive(r.pid)) entries.push(r);
+  }
+  for (const r of [...entries, ...readBackground()]) {
+    if (seen.has(r.sessionId)) continue;
     seen.add(r.sessionId);
     const s = session(r.sessionId);
-    const next = { name: r.name || '', cwd: r.cwd || '', pid: r.pid, kind: r.kind || '', status: r.status || '',
+    const next = { name: r.name || '', cwd: r.cwd || '', pid: r.pid, kind: r.kind || '', short: r.short || '', status: r.status || '',
       startedAt: r.startedAt || 0, stateSince: r.statusUpdatedAt || 0, running: true, endedAt: 0 };
     if (s.status !== next.status) { s.dirty = true; s.stateChanged = true; }
     for (const k in next) if (s[k] !== next[k]) { s[k] = next[k]; changed = true; }
@@ -503,7 +532,7 @@ function summary(s) {
   // Claude Code reports busy, idle (turn finished) or waiting (blocked on a question or permission).
   // Blocked always needs you; a finished turn needs you only if it asked for something.
   const state = !s.running ? 'closed' : s.status === 'waiting' ? 'waiting' : s.status === 'idle' ? (needsYou(s) ? 'waiting' : 'finished') : 'working';
-  return { id: s.id, name: displayName(s), project: s.cwd ? path.basename(s.cwd) : '', cwd: s.cwd, state,
+  return { id: s.id, name: displayName(s), project: s.cwd ? path.basename(s.cwd) : '', cwd: s.cwd, state, background: s.kind === 'background',
     startedAt: s.startedAt, endedAt: s.endedAt, lastAt: s.lastAt, stateSince: s.stateSince || s.lastAt, progress, tasks: tasks || [], last };
 }
 
@@ -661,20 +690,83 @@ function openTab({ title, cwd, command }) {
         .on('error', e => console.log('Could not open a terminal:', e.message)).unref()).unref();
   }
 }
-function resumeSession(id) {
+// At this screen a session opens in a terminal tab; from your phone it starts in the background, where Remote
+// Control reaches it. (`--bg --resume` needs the full session id, or it starts a copy under a new one.)
+async function resumeSession(id, mode = 'here') {
   const s = /^[\w-]+$/.test(id) && recentSessions().find(x => x.id === id);
   if (!s) return 'That session is not in the Resume list.';
   if (s.running) return 'That session is already running.';
   if (!s.folderExists) return `Its folder no longer exists: ${s.cwd}`;
-  openTab({ title: s.name.slice(0, 40), cwd: s.cwd, command: fill(config.resume.command, { id }) });
+  if (mode === 'here') { openTab({ title: s.name.slice(0, 40), cwd: s.cwd, command: fill(config.resume.command, { id }) }); return ''; }
+  const r = await sh(fill(config.resume.background, { id }), 60e3, s.cwd);
+  return r.ok ? '' : r.out.split('\n').filter(Boolean).pop() || 'It did not start.';
+}
+
+// End a session for good: a background one is stopped (its conversation stays), an interactive one's process ends.
+async function endSession(id) {
+  const s = sessions.get(id);
+  if (!s || !s.running) return 'That session is not running.';
+  let r;
+  if (s.kind === 'background') {
+    if (!/^[0-9a-f]{8}$/.test(s.short)) return 'Unknown background session.';
+    r = await sh(`"${CLAUDE_BIN}" stop ${s.short}`, 30e3); // stop takes the short id
+  } else if (process.platform === 'win32') {
+    r = await sh(`taskkill /PID ${+s.pid} /T /F`, 15e3);
+  } else {
+    try { process.kill(+s.pid, 'SIGTERM'); r = { ok: true }; } catch (e) { r = { ok: false, out: e.message }; }
+  }
+  if (r.ok) setTimeout(tick, 500);
+  return r.ok ? '' : String(r.out || '').split('\n').filter(Boolean).pop() || 'It did not end.';
+}
+
+// The transfer button: a command you set up, and the status file it writes (lastPush, lastPull, running, result, error).
+const syncRun = { running: false, error: '' };
+let syncSeen = 0;
+function syncState() {
+  if (!config.sync) return null;
+  let status = null;
+  try { status = JSON.parse(fs.readFileSync(home(config.sync.status), 'utf8')); } catch {}
+  return { label: config.sync.label || 'Transfer now', status, running: syncRun.running || !!(status && status.running), error: syncRun.error };
+}
+function runSync() {
+  if (!config.sync || !config.sync.command) return 'No transfer is set up here.';
+  if (syncRun.running) return 'A transfer is already running.';
+  Object.assign(syncRun, { running: true, error: '' }); bump();
+  sh(config.sync.command, 3 * 3600e3).then(r => { Object.assign(syncRun, { running: false, error: r.ok ? '' : r.out.split('\n').filter(Boolean).pop() || 'failed' }); bump(); });
   return '';
 }
+function watchSync() { // the transfer also runs on its own schedule; show its new status when the file changes
+  if (!config.sync || !config.sync.status) return;
+  let m = 0;
+  try { m = fs.statSync(home(config.sync.status)).mtimeMs; } catch {}
+  if (m !== syncSeen) { syncSeen = m; bump(); }
+}
+
+// ---- Other computers (the laptop switch) ---------------------------------------------------------
+// Each computer runs its own Hive. This one shows another's sessions by asking its Hive, which answers this
+// computer as one of your devices: viewing is open to them, launching only with "launchFrom": "my-devices" there.
+const peers = (config.peers || []).filter(p => p && p.name && p.url).map(p => ({ name: String(p.name), url: String(p.url).replace(/\/+$/, ''), online: false }));
+async function pingPeers() {
+  for (const p of peers) {
+    const was = p.online;
+    try { p.online = (await fetch(p.url + '/api/ping', { signal: AbortSignal.timeout(4000) })).ok; } catch { p.online = false; }
+    if (p.online !== was) bump();
+  }
+}
+const machines = () => [{ name: MACHINE, self: true, online: true }, ...peers.map(p => ({ name: p.name, online: p.online }))]
+  .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+function toPeer(p, route, body) {
+  return fetch(p.url + route, { method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
+    headers: { 'x-hive': '1', 'content-type': 'application/json' }, signal: AbortSignal.timeout(body ? 90e3 : 8000) });
+}
+// The clips live on one computer; a Hive without clips plays the first online one's.
+let clipPeer = null;
 
 // Routine steps: { open, args, cwd, unlessRunning } starts an app, { run } runs a command and waits for it,
 // { waitFor, timeout } retries a command until it succeeds, { tab: { title, cwd, command } } opens a terminal tab.
-function sh(cmd, timeoutMs = 120e3) {
+function sh(cmd, timeoutMs = 120e3, cwd = os.homedir()) {
   return new Promise(resolve => {
-    const child = spawn(cmd, { shell: true, windowsHide: true, cwd: os.homedir(), env: cleanEnv() });
+    const child = spawn(cmd, { shell: true, windowsHide: true, cwd, env: cleanEnv() });
     let out = '';
     child.stdout && child.stdout.on('data', d => out += d);
     child.stderr && child.stderr.on('data', d => out += d);
@@ -743,13 +835,27 @@ async function runRoutine(name, { dryRun = false, log = () => {} } = {}) {
   } finally { bump(); }
 }
 
-// Launching things is for this computer only: never for other devices on the tailnet, never for other websites.
-let tsIPs = [];
+// Who may launch things: this computer; with "launchFrom": "my-devices" also your own devices on Tailscale.
+// Never other people on your tailnet, never the internet, never other websites (see the POST checks in handle()).
+let tsIPs = [], tsOwner = '', tsOwnerIPs = new Set();
+const loopback = req => /^(127\.0\.0\.1|::1)$/.test(String(req.socket.remoteAddress || '').replace(/^::ffff:/, ''));
+const forwardedFor = req => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim().replace(/^::ffff:/, '');
 function fromThisComputer(req) {
-  const a = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
-  if (a !== '127.0.0.1' && a !== '::1') return false;
-  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim().replace(/^::ffff:/, '');
-  return !fwd || tsIPs.includes(fwd); // through `tailscale serve`, only this machine's own Tailscale address
+  const fwd = forwardedFor(req);
+  return loopback(req) && (!fwd || tsIPs.includes(fwd)); // through `tailscale serve`, only this machine's own Tailscale address
+}
+// `tailscale serve` names the signed-in Tailscale user of every request (and drops any such header a client sends).
+// Both have to match: that user is this computer's owner, and the address is one of that owner's devices.
+function fromMyDevice(req) {
+  const fwd = forwardedFor(req);
+  return loopback(req) && !!fwd && !!tsOwner && !req.headers['tailscale-funnel-request']
+    && String(req.headers['tailscale-user-login'] || '').toLowerCase() === tsOwner && tsOwnerIPs.has(fwd);
+}
+// 'here' = you're at this screen; 'away' = one of your other devices, so things start in the background.
+function launchMode(req) {
+  if (DEMO) return '';
+  if (fromThisComputer(req)) return 'here';
+  return config.launchFrom === 'my-devices' && fromMyDevice(req) ? 'away' : '';
 }
 function readBody(req) {
   return new Promise(resolve => { let b = ''; req.on('data', d => { b += d; if (b.length > 1e4) req.destroy(); }); req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } }); });
@@ -762,16 +868,18 @@ const HOSTS = /^(hive\.localhost|localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const TAILSCALE_BINS = process.platform === 'win32' ? ['tailscale', 'C:\\Program Files\\Tailscale\\tailscale.exe']
   : process.platform === 'darwin' ? ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'] : ['tailscale'];
 let tsName = '';
-function readTailscaleName() {
-  if (tsName || !config.tailscale || DEMO) return;
-  for (const bin of TAILSCALE_BINS) {
-    try {
-      const st = JSON.parse(execFileSync(bin, ['status', '--json'], { windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).toString());
-      tsName = String((st.Self && st.Self.DNSName) || '').replace(/\.$/, '').toLowerCase();
-      tsIPs = (st.Self && st.Self.TailscaleIPs) || [];
-      if (tsName) return;
-    } catch {}
-  }
+// This machine's Tailscale name and addresses, its owner, and that owner's devices. Read again every minute.
+function readTailscale(i = 0) {
+  if (!config.tailscale || DEMO || i >= TAILSCALE_BINS.length) return;
+  execFile(TAILSCALE_BINS[i], ['status', '--json'], { windowsHide: true, timeout: 5000 }, (err, out) => {
+    let st;
+    try { st = JSON.parse(out); } catch { return readTailscale(i + 1); }
+    const self = st.Self || {}, users = st.User || {}, untagged = n => !(n.Tags && n.Tags.length);
+    tsName = String(self.DNSName || '').replace(/\.$/, '').toLowerCase();
+    tsIPs = self.TailscaleIPs || [];
+    tsOwner = untagged(self) ? String((users[self.UserID] || {}).LoginName || '').toLowerCase() : '';
+    tsOwnerIPs = new Set([self, ...Object.values(st.Peer || {})].filter(n => n.UserID === self.UserID && untagged(n)).flatMap(n => n.TailscaleIPs || []));
+  });
 }
 function hostOk(h) {
   h = String(h || '').toLowerCase();
@@ -786,6 +894,49 @@ const STATIC = {
   '/icon-maskable-512.png': ['icon-maskable-512.png', 'image/png'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
 };
 
+function localState(mode) {
+  return { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', machine: MACHINE, machines: machines(), view: MACHINE,
+    sessions: list(), canLaunch: !!mode, here: mode === 'here', routines: (config.routines || []).map(r => ({ name: r.name, icon: r.icon || 'rocket' })), routine, sync: syncState() };
+}
+// Streams another Hive's answer through (server-sent events, video byte ranges).
+async function pipeFrom(p, route, req, res, headers = {}) {
+  const ac = new AbortController();
+  req.on('close', () => ac.abort());
+  const r = await fetch(p.url + route, { headers, signal: ac.signal });
+  const out = {};
+  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control']) { const v = r.headers.get(k); if (v) out[k] = v; }
+  res.writeHead(r.status, out);
+  if (!r.body) return res.end();
+  require('stream').Readable.fromWeb(r.body).on('error', () => res.end()).pipe(res);
+}
+async function viaPeer(req, res, u, p, mode) {
+  const off = { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', machine: MACHINE, machines: machines(), view: p.name, offline: true,
+    sessions: [], canLaunch: false, routines: [], routine: {}, sync: null };
+  if (u.pathname === '/events') {
+    if (p.online) return pipeFrom(p, '/events', req, res);
+    // While it's off, this Hive's own events tell the page when it comes back.
+  } else if (!p.online) {
+    return u.pathname === '/api/state' ? json(res, off) : json(res, u.pathname === '/api/recent' ? [] : { ok: false, error: `The ${p.name} is off.` });
+  } else if (u.pathname === '/api/state') {
+    const d = await (await toPeer(p, '/api/state')).json();
+    return json(res, { ...d, demo: DEMO, secure: off.secure, machine: MACHINE, machines: machines(), view: p.name, canLaunch: !!mode && !!d.canLaunch, here: false });
+  } else if (u.pathname === '/api/recent') {
+    return json(res, mode ? await (await toPeer(p, '/api/recent')).json() : []);
+  } else if (u.pathname.startsWith('/api/session/')) {
+    const r = await toPeer(p, u.pathname);
+    if (!r.ok) { res.writeHead(r.status); return res.end(); }
+    return json(res, await r.json());
+  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync'].includes(u.pathname)) {
+    const body = await readBody(req), r = await toPeer(p, u.pathname, body);
+    return json(res, r.ok ? await r.json() : { ok: false, error: `The ${p.name}'s Hive refused that (${r.status}).` });
+  } else { res.writeHead(404); return res.end(); }
+  // (events while the other computer is off)
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+  res.write(`data: ${version}\n\n`);
+  clients.add(res);
+  req.on('close', () => clients.delete(res));
+}
+
 function handle(req, res) {
   if (!hostOk(req.headers.host)) { res.writeHead(403); return res.end(); }
   const u = new URL(req.url, 'http://x');
@@ -794,16 +945,34 @@ function handle(req, res) {
     res.writeHead(200, { 'content-type': st[1], 'cache-control': 'no-cache' });
     return fs.createReadStream(path.join(PUBLIC, st[0])).pipe(res);
   }
-  if (u.pathname === '/api/state') return json(res, { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', sessions: list(),
-    canLaunch: fromThisComputer(req) && !DEMO, routines: (config.routines || []).map(r => ({ name: r.name, icon: r.icon || 'rocket' })), routine });
-  if (u.pathname === '/api/recent') return json(res, fromThisComputer(req) && !DEMO ? recentSessions() : []);
-  if (u.pathname === '/api/resume' || u.pathname === '/api/routine') {
+  // hive.localhost asks this to see whether the secure Tailscale address is reachable before moving there.
+  if (u.pathname === '/api/ping') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+    return res.end('{"ok":true}');
+  }
+  const mode = launchMode(req);
+  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync'].includes(u.pathname);
+  if (LAUNCH) {
     // Only a JSON POST with our own header: browsers can't send that from another website without asking first.
     const origin = req.headers.origin ? new URL(req.headers.origin).host : req.headers.host;
     if (req.method !== 'POST' || req.headers['x-hive'] !== '1' || !String(req.headers['content-type']).startsWith('application/json')
-      || !hostOk(origin) || !fromThisComputer(req) || DEMO) { res.writeHead(403); return res.end(); }
-    return readBody(req).then(body => {
-      if (u.pathname === '/api/resume') { const err = resumeSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
+      || !hostOk(origin) || !mode) { res.writeHead(403); return res.end(); }
+  }
+  // ?m=<computer> shows another computer's sessions, through its own Hive.
+  const m = u.searchParams.get('m') || '';
+  const peer = m && m !== MACHINE ? peers.find(p => p.name === m) : null;
+  if (m && m !== MACHINE && !peer) { res.writeHead(404); return res.end(); }
+  if (peer) return viaPeer(req, res, u, peer, mode).catch(() => {
+    if (!res.headersSent) json(res, { ok: false, error: `The ${peer.name} did not answer.` }); else res.end();
+  });
+
+  if (u.pathname === '/api/state') return json(res, localState(mode));
+  if (u.pathname === '/api/recent') return json(res, mode ? recentSessions() : []);
+  if (LAUNCH) {
+    return readBody(req).then(async body => {
+      if (u.pathname === '/api/resume') { const err = await resumeSession(String(body.id || ''), mode); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/end') { const err = await endSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/sync') { const err = runSync(); return json(res, { ok: !err, error: err }); }
       const started = runRoutine(String(body.name || ''));
       started.catch(e => console.log('Routine stopped:', e.message));
       // A wrong name or a routine that's still going fails right away; anything later shows on the board.
@@ -811,14 +980,18 @@ function handle(req, res) {
         .then(err => json(res, { ok: !err, error: err }));
     });
   }
-  // hive.localhost asks this to see whether the secure Tailscale address is reachable before moving there.
-  if (u.pathname === '/api/ping') {
-    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
-    return res.end('{"ok":true}');
+  if (u.pathname === '/api/clips') {
+    if (clips.length || !peers.some(p => p.online)) return json(res, clips.map((c, id) => ({ id, name: c.name, label: c.label })));
+    return (async () => {
+      for (const p of peers.filter(x => x.online)) {
+        try { const list = await (await toPeer(p, '/api/clips')).json(); if (list.length) { clipPeer = p; return json(res, list); } } catch {}
+      }
+      json(res, []);
+    })();
   }
-  if (u.pathname === '/api/clips') return json(res, clips.map((c, id) => ({ id, name: c.name, label: c.label })));
   if (u.pathname.startsWith('/clip/')) {
     const c = clips[+u.pathname.slice(6)];
+    if (!c && !clips.length && clipPeer) return pipeFrom(clipPeer, u.pathname, req, res, req.headers.range ? { range: req.headers.range } : {}).catch(() => res.end());
     if (!c) { res.writeHead(404); return res.end(); }
     return sendVideo(req, res, c.file);
   }
@@ -864,15 +1037,17 @@ if (DEMO) {
   // Made-up sessions that play out by themselves: for trying Hive and for the screenshots.
   require('./demo.cjs')({ session, sessions, bump });
 } else {
-  readTailscaleName();
-  setInterval(readTailscaleName, 60e3);
+  readTailscale();
+  setInterval(readTailscale, 60e3);
   scanClosed();
   scanClips();
   setInterval(scanClips, 10 * 60e3);
   tick();
   setInterval(tick, 1000);
   setInterval(scanClosed, 60e3);
+  setInterval(watchSync, 2000);
 }
+if (peers.length && !DEMO) { pingPeers(); setInterval(pingPeers, 10e3); }
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25e3);
 
 const ports = [...new Set([config.port, ...(config.extraPorts || [])])];
