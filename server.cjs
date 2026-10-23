@@ -97,8 +97,8 @@ function session(id) {
   return s;
 }
 
-// Background sessions (`claude --bg`) aren't in that registry: the background service lists its live ones in
-// daemon/roster.json, and each keeps its state in jobs/<short id>/state.json.
+// Background sessions (`claude --bg`) register there too once they run, but the background service also lists its
+// live ones in daemon/roster.json, and each keeps its state in jobs/<short id>/state.json.
 function readBackground() {
   let roster;
   try { roster = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'daemon', 'roster.json'), 'utf8')); } catch { return []; }
@@ -131,7 +131,8 @@ function scanRegistry() {
     if (seen.has(r.sessionId)) continue;
     seen.add(r.sessionId);
     const s = session(r.sessionId);
-    const next = { name: r.name || '', cwd: r.cwd || '', pid: r.pid, kind: r.kind || '', short: r.short || '', status: r.status || '',
+    // A background session also registers itself there, as kind "bg" with its short id as jobId.
+    const next = { name: r.name || '', cwd: r.cwd || '', pid: r.pid, kind: r.kind === 'bg' ? 'background' : r.kind || '', short: r.short || r.jobId || '', status: r.status || '',
       startedAt: r.startedAt || 0, stateSince: r.statusUpdatedAt || 0, running: true, endedAt: 0 };
     if (s.status !== next.status) { s.dirty = true; s.stateChanged = true; }
     for (const k in next) if (s[k] !== next[k]) { s[k] = next[k]; changed = true; }

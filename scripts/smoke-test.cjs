@@ -146,6 +146,8 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   const dirB = path.join(tmp2, 'b'), projB = path.join(dirB, 'projects', '-far-away');
   for (const d of [path.join(dirB, 'sessions'), projB, path.join(dirB, 'daemon'), path.join(dirB, 'jobs', 'bbbbbbbb')]) fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(dirB, 'sessions', `${standIn.pid}.json`), JSON.stringify({ pid: standIn.pid, sessionId: 'far-session', cwd: '/far/away', name: 'far', status: 'busy', startedAt: Date.now() }));
+  // Real background sessions register as kind "bg" too, with a different pid than the roster's worker.
+  fs.writeFileSync(path.join(dirB, 'sessions', `${bg.pid}.json`), JSON.stringify({ pid: bg.pid, sessionId: 'bbbbbbbb-bg', cwd: '/far/away', name: 'deploy', kind: 'bg', jobId: 'bbbbbbbb', status: 'waiting', startedAt: Date.now() }));
   fs.writeFileSync(path.join(dirB, 'daemon', 'roster.json'), JSON.stringify({ supervisorPid: bg.pid, workers: { bbbbbbbb: { pid: bg.pid, sessionId: 'bbbbbbbb-bg', cwd: '/far/away' } } }));
   fs.writeFileSync(path.join(dirB, 'jobs', 'bbbbbbbb', 'state.json'), JSON.stringify({ state: 'blocked', tempo: 'blocked', needs: 'approve a command', name: 'deploy' }));
   for (const id of ['far-session', 'bbbbbbbb-bg']) fs.writeFileSync(path.join(projB, id + '.jsonl'),

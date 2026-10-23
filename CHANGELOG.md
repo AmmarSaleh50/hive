@@ -7,6 +7,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 
 ### Fixed
 
+- **Background sessions are recognised as such** when they register themselves (kind "bg"), so End stops them with `claude stop`.
 - **The switch works where Tailscale's DNS is off.** Hive looks up the other computer's Tailscale name in Tailscale's own list of devices, so it no longer depends on MagicDNS on that machine.
 
 ## 0.4.0 (2026-10-23)
