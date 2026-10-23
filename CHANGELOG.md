@@ -3,6 +3,13 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.2 (2026-10-23)
+
+### Fixed
+
+- **Resumed sessions save their transcript again.** When Hive itself had been started from inside a Claude Code session, the tabs it opened inherited that session's markers, and Claude there ran as a sub-session that doesn't save. Hive now leaves those markers out of everything it starts.
+- **Tabs look like your other PowerShell tabs**: they open with Windows Terminal's PowerShell profile, so they get its icon and font.
+
 ## 0.3.1 (2026-10-23)
 
 ### Fixed

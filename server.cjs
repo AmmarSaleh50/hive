@@ -621,8 +621,18 @@ function recentSessions() {
   return out.sort((a, b) => b.lastAt - a.lastAt);
 }
 
-// A tab in one shared terminal window, so every session you resume lands next to the others.
+// A tab in the terminal window you already have open, so every session you resume lands next to the others.
 const fill = (cmd, vars) => cmd.replace(/\{(\w+)\}/g, (m, k) => vars[k] !== undefined ? vars[k] : m);
+// What a Claude Code session marks its child processes with. If Hive was started from inside a session, these would
+// reach the terminals it opens, and Claude there would think it's a sub-session (which doesn't save its transcript).
+const SESSION_MARKS = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|ENTRYPOINT|EXECPATH|SESSION_\w+|MESSAGING_\w+|SSE_PORT|SHELL_\w+))$/i;
+function cleanEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!SESSION_MARKS.test(k)) env[k] = v;
+  return env;
+}
+// Windows Terminal's own profiles for the two PowerShells (the ids are the same on every PC), so a tab gets your icon and font.
+const WT_PROFILES = { pwsh: '{574e775e-4f2a-5b96-ac1e-a2962a402336}', powershell: '{61c54bbd-c2c6-5271-96e7-009a87ff44bf}' };
 // PowerShell 7 when it's installed, else the built-in Windows PowerShell. pwsh usually sits behind a Store
 // app alias that Node's fs can't see, so ask `where` like a shell would.
 let winShell = '';
@@ -631,23 +641,23 @@ function windowsShell() {
   return winShell;
 }
 function openTab({ title, cwd, command }) {
-  const dir = home(cwd || os.homedir());
+  const dir = home(cwd || os.homedir()), opts = { detached: true, stdio: 'ignore', env: cleanEnv() };
   if (process.platform === 'win32') {
     const shell = windowsShell();
     // `wt -w 0` adds the tab to the terminal window you used last (a name instead keeps a window of its own).
     // The command goes in encoded, because quotes and ";"
     // would otherwise be read by wt.exe itself before PowerShell ever sees them.
     const lit = s => s.replace(/;/g, '\\;'); // a bare ";" would start a new wt command
-    const args = ['-w', config.resume.window, 'new-tab', '--title', lit(title || 'Hive'), '-d', lit(dir),
+    const args = ['-w', config.resume.window, 'new-tab', '-p', WT_PROFILES[shell], '--title', lit(title || 'Hive'), '-d', lit(dir),
       shell, '-NoLogo', '-NoExit', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')];
-    spawn('wt.exe', args, { detached: true, stdio: 'ignore', windowsHide: false }).on('error', e => console.log('Could not open Windows Terminal:', e.message)).unref();
+    spawn('wt.exe', args, { ...opts, windowsHide: false }).on('error', e => console.log('Could not open Windows Terminal:', e.message)).unref();
   } else if (process.platform === 'darwin') {
     const script = `tell application "Terminal" to do script "cd ${JSON.stringify(dir).slice(1, -1)} && ${command.replace(/"/g, '\\"')}"`;
-    spawn('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { detached: true, stdio: 'ignore' })
+    spawn('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], opts)
       .on('error', e => console.log('Could not open Terminal:', e.message)).unref();
   } else {
-    spawn('gnome-terminal', ['--tab', `--title=${title || 'Hive'}`, `--working-directory=${dir}`, '--', 'bash', '-lc', `${command}; exec bash`], { detached: true, stdio: 'ignore' })
-      .on('error', () => spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && ${command}; exec bash'`], { detached: true, stdio: 'ignore' })
+    spawn('gnome-terminal', ['--tab', `--title=${title || 'Hive'}`, `--working-directory=${dir}`, '--', 'bash', '-lc', `${command}; exec bash`], opts)
+      .on('error', () => spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && ${command}; exec bash'`], opts)
         .on('error', e => console.log('Could not open a terminal:', e.message)).unref()).unref();
   }
 }
@@ -664,7 +674,7 @@ function resumeSession(id) {
 // { waitFor, timeout } retries a command until it succeeds, { tab: { title, cwd, command } } opens a terminal tab.
 function sh(cmd, timeoutMs = 120e3) {
   return new Promise(resolve => {
-    const child = spawn(cmd, { shell: true, windowsHide: true, cwd: os.homedir() });
+    const child = spawn(cmd, { shell: true, windowsHide: true, cwd: os.homedir(), env: cleanEnv() });
     let out = '';
     child.stdout && child.stdout.on('data', d => out += d);
     child.stderr && child.stderr.on('data', d => out += d);
@@ -693,7 +703,7 @@ async function openApp(step) {
     const [bin, args] = process.platform === 'darwin' && /\.app\/?$/.test(exe)
       ? ['open', ['-a', exe, ...((step.args || []).length ? ['--args', ...step.args] : [])]] : [exe, step.args || []];
     await new Promise((resolve, reject) => {
-      const child = spawn(bin, args, { cwd, detached: true, stdio: 'ignore' });
+      const child = spawn(bin, args, { cwd, detached: true, stdio: 'ignore', env: cleanEnv() });
       child.on('error', reject).on('spawn', () => { child.unref(); resolve(); });
     });
   }
