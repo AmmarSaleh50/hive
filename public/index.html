@@ -112,6 +112,7 @@ nav button.on { border-color: var(--fg); }
 .quiet { padding: 70px 0; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
 .quiet img { width: 44px; height: 44px; }
 .quiet b { font-size: 18px; }
+.quiet span { max-width: 520px; line-height: 1.5; }
 .more { font-weight: 500; border-bottom: 1px solid var(--fg); align-self: flex-start; }
 
 /* Resume: routines on top, then recent sessions by project */
@@ -683,7 +684,7 @@ function pick(name) {
 function renderSwitch(state) {
   const box = document.getElementById('msw'), ms = state.machines || [];
   box.hidden = ms.length < 2;
-  box.innerHTML = ms.map(x => `<button type="button" role="tab" aria-selected="${x.name === state.view}" data-machine="${esc(x.name)}"${x.name === state.view ? ' class="on"' : ''}>${esc(x.name)}${x.online ? '' : '<em>off</em>'}</button>`).join('');
+  box.innerHTML = ms.map(x => `<button type="button" role="tab" aria-selected="${x.name === state.view}" data-machine="${esc(x.name)}"${x.name === state.view ? ' class="on"' : ''}>${esc(x.name)}${x.online ? '' : `<em>${x.unreachable ? 'no link' : 'off'}</em>`}</button>`).join('');
 }
 
 async function load() {
@@ -706,7 +707,9 @@ async function load() {
   document.getElementById('tab-board').classList.toggle('on', r !== 'resume');
   tabResume.classList.toggle('on', r === 'resume');
   if (state.offline) {
-    app.innerHTML = `<div class="quiet"><img src="/logo.svg" alt=""><b>The ${esc(state.view)} is off.</b><span>Its sessions show up here as soon as it's on again.</span></div>`;
+    app.innerHTML = state.unreachable
+      ? `<div class="quiet"><img src="/logo.svg" alt=""><b>The ${esc(state.view)} is on, but this device can't reach it.</b><span>Tailscale sees it online. Something on this side is in the way, usually a VPN that takes over all traffic (like a university VPN). Disconnect it, or open Hive on another device.</span></div>`
+      : `<div class="quiet"><img src="/logo.svg" alt=""><b>The ${esc(state.view)} is off.</b><span>Its sessions show up here as soon as it's on again.</span></div>`;
   } else if (r.startsWith('s/')) {
     const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)) + q());
     app.innerHTML = res.ok ? renderSession(await res.json()) : '<div class="view"><button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button><div class="nowline">That session has left the hive.</div></div>';

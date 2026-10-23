@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.4 (2026-10-24)
+
+### Fixed
+
+- **"Off" only when it's off.** If the other computer is online in Tailscale but this one can't reach it, the switch says "no link" and the page explains the usual cause: a VPN that takes over all traffic, Tailscale's addresses included (Cisco AnyConnect does this).
+
 ## 0.4.3 (2026-10-24)
 
 ### Added

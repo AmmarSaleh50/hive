@@ -814,6 +814,10 @@ function watchSync() { // the transfer also runs on its own schedule; show its n
 const peers = (config.peers || []).filter(p => p && p.name && p.url).map(p => ({ name: String(p.name), url: String(p.url).replace(/\/+$/, ''), online: false }));
 // Tailscale names are looked up in Tailscale's own list of devices first, so this works where MagicDNS is off.
 let tsPeers = new Map(); // DNS name -> IPv4 address, from readTailscale()
+let tsOnline = new Map(); // DNS name -> whether Tailscale sees that device online
+// A computer Hive can't reach may still be on, which Tailscale knows. Then something on this side is in the way,
+// often a VPN that takes over all traffic, Tailscale's addresses included.
+function peerOnTailnet(p) { try { return tsOnline.get(new URL(p.url).hostname.toLowerCase()) === true; } catch { return false; } }
 function lookup(host, opts, cb) {
   if (typeof opts === 'function') { cb = opts; opts = {}; }
   const ip = tsPeers.get(String(host).toLowerCase());
@@ -839,7 +843,7 @@ async function pingPeers() {
     if (p.online !== was) bump();
   }
 }
-const machines = () => [{ name: MACHINE, self: true, online: true }, ...peers.map(p => ({ name: p.name, online: p.online }))]
+const machines = () => [{ name: MACHINE, self: true, online: true }, ...peers.map(p => ({ name: p.name, online: p.online, unreachable: !p.online && peerOnTailnet(p) }))]
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 async function toPeer(p, route, body) {
   const r = await request(p.url + route, { method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
@@ -968,6 +972,7 @@ function readTailscale(i = 0) {
     tsOwner = untagged(self) ? String((users[self.UserID] || {}).LoginName || '').toLowerCase() : '';
     tsOwnerIPs = new Set([self, ...Object.values(st.Peer || {})].filter(n => n.UserID === self.UserID && untagged(n)).flatMap(n => n.TailscaleIPs || []));
     tsPeers = new Map(Object.values(st.Peer || {}).map(n => [String(n.DNSName || '').replace(/\.$/, '').toLowerCase(), (n.TailscaleIPs || []).find(ip => ip.includes('.'))]).filter(([k, v]) => k && v));
+    tsOnline = new Map(Object.values(st.Peer || {}).map(n => [String(n.DNSName || '').replace(/\.$/, '').toLowerCase(), !!n.Online]));
   });
 }
 function hostOk(h) {
@@ -997,7 +1002,7 @@ async function pipeFrom(p, route, req, res, headers = {}) {
   r.stream.on('error', () => res.end()).pipe(res);
 }
 async function viaPeer(req, res, u, p, mode) {
-  const off = { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', machine: MACHINE, machines: machines(), view: p.name, offline: true,
+  const off = { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', machine: MACHINE, machines: machines(), view: p.name, offline: true, unreachable: peerOnTailnet(p),
     sessions: [], canLaunch: false, routines: [], routine: {}, sync: null };
   if (u.pathname === '/events') {
     if (p.online) return pipeFrom(p, '/events', req, res);
