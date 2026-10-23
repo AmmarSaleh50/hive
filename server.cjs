@@ -746,18 +746,40 @@ function watchSync() { // the transfer also runs on its own schedule; show its n
 // Each computer runs its own Hive. This one shows another's sessions by asking its Hive, which answers this
 // computer as one of your devices: viewing is open to them, launching only with "launchFrom": "my-devices" there.
 const peers = (config.peers || []).filter(p => p && p.name && p.url).map(p => ({ name: String(p.name), url: String(p.url).replace(/\/+$/, ''), online: false }));
+// Tailscale names are looked up in Tailscale's own list of devices first, so this works where MagicDNS is off.
+let tsPeers = new Map(); // DNS name -> IPv4 address, from readTailscale()
+function lookup(host, opts, cb) {
+  if (typeof opts === 'function') { cb = opts; opts = {}; }
+  const ip = tsPeers.get(String(host).toLowerCase());
+  if (!ip) return require('dns').lookup(host, opts, cb);
+  return opts && opts.all ? cb(null, [{ address: ip, family: 4 }]) : cb(null, ip, 4);
+}
+// One request to another Hive. Resolves with { status, headers, stream }.
+function request(url, { method = 'GET', body, headers = {}, timeout = 8000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url), mod = u.protocol === 'https:' ? require('https') : http;
+    const r = mod.request(u, { method, lookup, headers: body ? { ...headers, 'content-length': Buffer.byteLength(body) } : headers }, res =>
+      resolve({ status: res.statusCode, headers: res.headers, stream: res }));
+    r.setTimeout(timeout, () => r.destroy(new Error('timed out')));
+    r.on('error', reject);
+    r.end(body);
+  });
+}
+const readAll = s => new Promise((resolve, reject) => { let b = ''; s.on('data', d => b += d).on('end', () => resolve(b)).on('error', reject); });
 async function pingPeers() {
   for (const p of peers) {
     const was = p.online;
-    try { p.online = (await fetch(p.url + '/api/ping', { signal: AbortSignal.timeout(4000) })).ok; } catch { p.online = false; }
+    try { const r = await request(p.url + '/api/ping', { timeout: 4000 }); r.stream.resume(); p.online = r.status === 200; } catch { p.online = false; }
     if (p.online !== was) bump();
   }
 }
 const machines = () => [{ name: MACHINE, self: true, online: true }, ...peers.map(p => ({ name: p.name, online: p.online }))]
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-function toPeer(p, route, body) {
-  return fetch(p.url + route, { method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
-    headers: { 'x-hive': '1', 'content-type': 'application/json' }, signal: AbortSignal.timeout(body ? 90e3 : 8000) });
+async function toPeer(p, route, body) {
+  const r = await request(p.url + route, { method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
+    headers: { 'x-hive': '1', 'content-type': 'application/json' }, timeout: body ? 90e3 : 8000 });
+  const text = await readAll(r.stream);
+  return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => JSON.parse(text) };
 }
 // The clips live on one computer; a Hive without clips plays the first online one's.
 let clipPeer = null;
@@ -879,6 +901,7 @@ function readTailscale(i = 0) {
     tsIPs = self.TailscaleIPs || [];
     tsOwner = untagged(self) ? String((users[self.UserID] || {}).LoginName || '').toLowerCase() : '';
     tsOwnerIPs = new Set([self, ...Object.values(st.Peer || {})].filter(n => n.UserID === self.UserID && untagged(n)).flatMap(n => n.TailscaleIPs || []));
+    tsPeers = new Map(Object.values(st.Peer || {}).map(n => [String(n.DNSName || '').replace(/\.$/, '').toLowerCase(), (n.TailscaleIPs || []).find(ip => ip.includes('.'))]).filter(([k, v]) => k && v));
   });
 }
 function hostOk(h) {
@@ -900,14 +923,12 @@ function localState(mode) {
 }
 // Streams another Hive's answer through (server-sent events, video byte ranges).
 async function pipeFrom(p, route, req, res, headers = {}) {
-  const ac = new AbortController();
-  req.on('close', () => ac.abort());
-  const r = await fetch(p.url + route, { headers, signal: ac.signal });
+  const r = await request(p.url + route, { headers, timeout: 0 }); // events stay open; ended when you leave
+  req.on('close', () => r.stream.destroy());
   const out = {};
-  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control']) { const v = r.headers.get(k); if (v) out[k] = v; }
+  for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control']) if (r.headers[k]) out[k] = r.headers[k];
   res.writeHead(r.status, out);
-  if (!r.body) return res.end();
-  require('stream').Readable.fromWeb(r.body).on('error', () => res.end()).pipe(res);
+  r.stream.on('error', () => res.end()).pipe(res);
 }
 async function viaPeer(req, res, u, p, mode) {
   const off = { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', machine: MACHINE, machines: machines(), view: p.name, offline: true,
