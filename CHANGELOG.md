@@ -3,6 +3,16 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.3 (2026-10-24)
+
+### Added
+
+- **Unfold the quiet steps.** "33 steps since you asked" is a button now: it lists every step with its time, oldest first, ending with the one it's on.
+
+### Fixed
+
+- **Tables on phones** were squeezed until words broke letter by letter. On a phone each row is now a small card: the first cell as its title, the others under their column's heading. On wider screens, words in table cells no longer break in the middle.
+
 ## 0.4.2 (2026-10-23)
 
 ### Fixed

@@ -214,7 +214,7 @@ function ingest(s, line) {
       s.pending = { id: b.id, name: b.name };
       const inp = b.input || {};
       const what = actionText(b.name, inp);
-      if (what) { s.acts.push({ at, what }); if (s.acts.length > 60) s.acts.shift(); }
+      if (what) { s.acts.push({ at, what }); if (s.acts.length > 300) s.acts.shift(); }
       if (b.name === 'TodoWrite' && Array.isArray(inp.todos))
         s.todos = inp.todos.map((t, i) => ({ id: String(i + 1), subject: t.content, activeForm: t.activeForm, status: t.status }));
       // Questions and plans are addressed to you, so they belong in the messages.
@@ -279,12 +279,13 @@ function readNew(s) {
 }
 
 // What it has done since it last said something (or since you asked), while it keeps working without a word.
-function quietWork(s) {
+// `all` adds every one of those steps, for the session page, where you can unfold them.
+function quietWork(s, all = false) {
   const msgs = active(s), last = msgs[msgs.length - 1], since = last ? last.at : 0;
   const acts = s.acts.filter(a => a.at >= since);
   if (!s.running || !acts.length) return null;
   return { count: acts.length, now: acts[acts.length - 1].what, at: acts[acts.length - 1].at, since, afterYou: !last || last.role === 'you',
-    recent: acts.slice(-6).map(a => a.what) };
+    recent: acts.slice(-6).map(a => a.what), ...(all ? { steps: acts } : {}) };
 }
 
 // Task lists (TaskCreate/TaskUpdate) are stored by Claude Code in ~/.claude/tasks/<sessionId>/<n>.json
@@ -1084,7 +1085,9 @@ function handle(req, res) {
   if (u.pathname.startsWith('/api/session/')) {
     const s = sessions.get(decodeURIComponent(u.pathname.slice(13)));
     if (!s) { res.writeHead(404); return res.end(); }
-    return json(res, { version, session: summary(s), msgs: withFinal(s) });
+    const sum = summary(s);
+    if (sum.activity) sum.activity = quietWork(s, true);
+    return json(res, { version, session: sum, msgs: withFinal(s) });
   }
   if (u.pathname === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
