@@ -3,6 +3,13 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.2 (2026-10-23)
+
+### Fixed
+
+- **A session working without a word no longer looks empty.** Under your latest request, Hive now shows what it is doing right now and how many steps it has taken since you asked (or since it last said something). Haiku's progress sees those steps too, so the now-line and steps keep moving during long quiet stretches, for example while a skill runs.
+- **Resume shows "Starting…"** on every device until the session is running, and refuses a second press. If Claude would only start a copy of a session (because it's still open somewhere), Hive ends the copy and tells you why.
+
 ## 0.4.1 (2026-10-23)
 
 ### Fixed

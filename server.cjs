@@ -90,7 +90,7 @@ function session(id) {
   let s = sessions.get(id);
   if (!s) {
     s = { id, name: '', title: '', cwd: '', pid: 0, kind: '', status: '', startedAt: 0, running: false,
-      endedAt: 0, file: null, offset: 0, rest: null, msgs: [], parents: new Map(), leaf: null, todos: null, tasks: null, tasksSig: '', lastAt: 0,
+      endedAt: 0, file: null, offset: 0, rest: null, msgs: [], acts: [], parents: new Map(), leaf: null, todos: null, tasks: null, tasksSig: '', lastAt: 0,
       prog: cache[id] || null, dirty: false, summarizing: false, lastRun: 0 };
     sessions.set(id, s);
   }
@@ -170,6 +170,25 @@ function push(s, m) {
   if (s.msgs.length > KEEP) s.msgs.splice(0, s.msgs.length - KEEP);
 }
 
+// A few words on what a tool call does. The calls stay hidden; this is only for a session that works for a
+// while without saying anything, so its turn doesn't look empty.
+const fileOf = p => String(p || '').split(/[\\/]/).pop();
+function actionText(name, i) {
+  switch (name) {
+    case 'Bash': case 'PowerShell': return String(i.description || String(i.command || '').split('\n')[0]).slice(0, 90);
+    case 'Edit': case 'MultiEdit': case 'NotebookEdit': return `Editing ${fileOf(i.file_path || i.notebook_path)}`;
+    case 'Write': return `Writing ${fileOf(i.file_path)}`;
+    case 'Read': return `Reading ${fileOf(i.file_path)}`;
+    case 'Grep': case 'Glob': return `Searching for ${String(i.pattern || '').slice(0, 60)}`;
+    case 'Skill': return `Using the ${i.skill || ''} skill`;
+    case 'Task': case 'Agent': return `Agent: ${String(i.description || 'working').slice(0, 80)}`;
+    case 'WebSearch': return `Searching the web: ${String(i.query || '').slice(0, 70)}`;
+    case 'WebFetch': try { return `Reading ${new URL(i.url).host}`; } catch { return 'Reading a web page'; }
+    case 'TodoWrite': case 'TaskCreate': case 'TaskUpdate': case 'TaskList': case 'TaskGet': case 'AskUserQuestion': case 'ExitPlanMode': return '';
+    default: return String(name || '').replace(/^mcp__.*?__/, '').replace(/_/g, ' ');
+  }
+}
+
 function ingest(s, line) {
   if (line.length > 4e6) return;
   let o;
@@ -194,6 +213,8 @@ function ingest(s, line) {
       if (b.type !== 'tool_use') continue;
       s.pending = { id: b.id, name: b.name };
       const inp = b.input || {};
+      const what = actionText(b.name, inp);
+      if (what) { s.acts.push({ at, what }); if (s.acts.length > 60) s.acts.shift(); }
       if (b.name === 'TodoWrite' && Array.isArray(inp.todos))
         s.todos = inp.todos.map((t, i) => ({ id: String(i + 1), subject: t.content, activeForm: t.activeForm, status: t.status }));
       // Questions and plans are addressed to you, so they belong in the messages.
@@ -238,7 +259,7 @@ function readNew(s) {
   if (!s.file) return false;
   let st;
   try { st = fs.statSync(s.file); } catch { return false; }
-  if (st.size < s.offset) { s.offset = 0; s.rest = null; s.msgs = []; s.parents = new Map(); s.leaf = null; }
+  if (st.size < s.offset) { s.offset = 0; s.rest = null; s.msgs = []; s.acts = []; s.parents = new Map(); s.leaf = null; }
   if (st.size === s.offset) return false;
   let start = s.offset, partial = false;
   if (start === 0 && st.size > TAIL) { start = st.size - TAIL; partial = true; }
@@ -252,9 +273,18 @@ function readNew(s) {
   s.rest = buf.subarray(end + 1);
   const lines = buf.subarray(0, end).toString('utf8').split('\n');
   if (partial) lines.shift();
-  const before = s.msgs.length && s.msgs[s.msgs.length - 1];
+  const before = s.msgs.length && s.msgs[s.msgs.length - 1], actBefore = s.acts[s.acts.length - 1];
   for (const l of lines) if (l) ingest(s, l);
-  return s.msgs.length !== 0 && s.msgs[s.msgs.length - 1] !== before;
+  return (s.msgs.length !== 0 && s.msgs[s.msgs.length - 1] !== before) || s.acts[s.acts.length - 1] !== actBefore;
+}
+
+// What it has done since it last said something (or since you asked), while it keeps working without a word.
+function quietWork(s) {
+  const msgs = active(s), last = msgs[msgs.length - 1], since = last ? last.at : 0;
+  const acts = s.acts.filter(a => a.at >= since);
+  if (!s.running || !acts.length) return null;
+  return { count: acts.length, now: acts[acts.length - 1].what, at: acts[acts.length - 1].at, since, afterYou: !last || last.role === 'you',
+    recent: acts.slice(-6).map(a => a.what) };
 }
 
 // Task lists (TaskCreate/TaskUpdate) are stored by Claude Code in ~/.claude/tasks/<sessionId>/<n>.json
@@ -407,6 +437,9 @@ function transcriptText(s) {
     used += line.length;
     parts.unshift(line);
   }
+  // A long quiet stretch has no text, so tell Haiku what the tools have been doing, or it would see no progress.
+  const q = quietWork(s);
+  if (q) parts.push(`(Since ${new Date(q.since).toISOString().slice(11, 16)} the assistant has been working without writing: ${q.count} tool steps, the latest: ${q.recent.join('; ')})`);
   return parts.join('\n\n');
 }
 
@@ -534,7 +567,8 @@ function summary(s) {
   // Blocked always needs you; a finished turn needs you only if it asked for something.
   const state = !s.running ? 'closed' : s.status === 'waiting' ? 'waiting' : s.status === 'idle' ? (needsYou(s) ? 'waiting' : 'finished') : 'working';
   return { id: s.id, name: displayName(s), project: s.cwd ? path.basename(s.cwd) : '', cwd: s.cwd, state, background: s.kind === 'background',
-    startedAt: s.startedAt, endedAt: s.endedAt, lastAt: s.lastAt, stateSince: s.stateSince || s.lastAt, progress, tasks: tasks || [], last };
+    startedAt: s.startedAt, endedAt: s.endedAt, lastAt: s.lastAt, stateSince: s.stateSince || s.lastAt, progress, tasks: tasks || [], last,
+    starting: !s.running && isStarting(s.id), activity: state === 'closed' || state === 'finished' ? null : quietWork(s) };
 }
 
 // A message is a turn's result when it's Claude's last word before your next prompt, or before the
@@ -645,7 +679,7 @@ function recentSessions() {
       if (!info || !info.cwd) continue;
       const id = f.slice(0, -6), live = sessions.get(id);
       out.push({ id, ...info, name: (live && live.running && live.name) || info.name, project: path.basename(info.cwd),
-        lastAt: st.mtimeMs, running: !!(live && live.running), folderExists: fs.existsSync(info.cwd) });
+        lastAt: st.mtimeMs, running: !!(live && live.running), starting: isStarting(id), folderExists: fs.existsSync(info.cwd) });
     }
   }
   return out.sort((a, b) => b.lastAt - a.lastAt);
@@ -691,16 +725,46 @@ function openTab({ title, cwd, command }) {
         .on('error', e => console.log('Could not open a terminal:', e.message)).unref()).unref();
   }
 }
+// A resume in flight, per session: every device shows "Starting..." and a second press is refused, until the session
+// shows up as running or a minute has passed.
+const starting = new Map(); // session id -> when the resume was asked
+function isStarting(id) {
+  const t = starting.get(id), s = sessions.get(id);
+  if (t && Date.now() - t < 60e3 && !(s && s.running)) return true;
+  starting.delete(id); return false;
+}
+// The background service's live job for a short id: which session it really runs.
+function rosterSession(short) {
+  try { const w = (JSON.parse(fs.readFileSync(path.join(CLAUDE, 'daemon', 'roster.json'), 'utf8')).workers || {})[short]; return w && w.sessionId || ''; } catch { return ''; }
+}
 // At this screen a session opens in a terminal tab; from your phone it starts in the background, where Remote
-// Control reaches it. (`--bg --resume` needs the full session id, or it starts a copy under a new one.)
+// Control reaches it. (`--bg --resume` needs the full session id, or it starts a copy under a new one. It also starts
+// a copy, under a new id, when the session is still open somewhere: such a copy is ended at once and you're told why.)
 async function resumeSession(id, mode = 'here') {
   const s = /^[\w-]+$/.test(id) && recentSessions().find(x => x.id === id);
   if (!s) return 'That session is not in the Resume list.';
   if (s.running) return 'That session is already running.';
+  if (isStarting(id)) return 'It is already starting.';
   if (!s.folderExists) return `Its folder no longer exists: ${s.cwd}`;
+  starting.set(id, Date.now()); bump();
   if (mode === 'here') { openTab({ title: s.name.slice(0, 40), cwd: s.cwd, command: fill(config.resume.command, { id }) }); return ''; }
-  const r = await sh(fill(config.resume.background, { id }), 60e3, s.cwd);
-  return r.ok ? '' : r.out.split('\n').filter(Boolean).pop() || 'It did not start.';
+  // One that ran in the background before keeps its own options in its job record; any option added here would make
+  // Claude start a copy instead, so it's woken just as it was (the command up to the id).
+  let job = null;
+  try { job = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'jobs', id.slice(0, 8), 'state.json'), 'utf8')); } catch {}
+  const cmd = job && job.sessionId === id ? config.resume.background.replace(/\{id\}.*$/, '{id}') : config.resume.background;
+  const r = await sh(fill(cmd, { id }), 60e3, s.cwd);
+  if (!r.ok) { starting.delete(id); bump(); return r.out.split('\n').filter(Boolean).pop() || 'It did not start.'; }
+  const short = (r.out.match(/claude attach ([0-9a-f]{8})/) || [])[1] || '';
+  await new Promise(res => setTimeout(res, 1500));
+  const runs = short ? rosterSession(short) : '';
+  if (/\bcopy\b/i.test(r.out) || (runs && runs !== id)) {
+    if (short) { await sh(`"${CLAUDE_BIN}" stop ${short}`, 30e3); await sh(`"${CLAUDE_BIN}" rm ${short}`, 30e3); }
+    starting.delete(id); bump();
+    return `Claude would only start a copy of "${s.name}", not continue it, so nothing was started. Is it still open in a Claude window on the ${config.machine || 'laptop'}? Close it there, then Resume again.`;
+  }
+  setTimeout(tick, 500);
+  return '';
 }
 
 // End a session for good: a background one is stopped (its conversation stays), an interactive one's process ends.

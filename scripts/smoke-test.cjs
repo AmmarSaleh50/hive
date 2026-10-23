@@ -152,6 +152,10 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   fs.writeFileSync(path.join(dirB, 'jobs', 'bbbbbbbb', 'state.json'), JSON.stringify({ state: 'blocked', tempo: 'blocked', needs: 'approve a command', name: 'deploy' }));
   for (const id of ['far-session', 'bbbbbbbb-bg']) fs.writeFileSync(path.join(projB, id + '.jsonl'),
     JSON.stringify({ uuid: id + '1', parentUuid: null, type: 'user', cwd: '/far/away', timestamp: new Date().toISOString(), message: { role: 'user', content: 'Ship it' } }) + '\n');
+  // far-session works without writing anything after the prompt: two tool calls, no text.
+  fs.appendFileSync(path.join(projB, 'far-session.jsonl'), [1, 2].map(n => JSON.stringify({ uuid: 'far-a' + n, parentUuid: n === 1 ? 'far-session1' : 'far-a1',
+    type: 'assistant', cwd: '/far/away', timestamp: new Date(Date.now() + n * 1000).toISOString(),
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 't' + n, name: 'Bash', input: { command: 'deploy.sh', description: n === 1 ? 'Build the image' : 'Deploy to production' } }] } })).join('\n') + '\n');
   const cfgA = path.join(tmp2, 'a.json'), cfgB = path.join(tmp2, 'b.json');
   fs.writeFileSync(cfgB, JSON.stringify({ machine: '2060', claudeDir: dirB, dataDir: path.join(tmp2, 'db'), summaries: { enabled: false }, tailscale: false, launchFrom: 'my-devices' }));
   fs.writeFileSync(cfgA, JSON.stringify({ machine: '4070', claudeDir: path.join(tmp2, 'a'), dataDir: path.join(tmp2, 'da'), summaries: { enabled: false }, tailscale: false,
@@ -169,6 +173,8 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     const bgs = far.sessions.find(s => s.id === 'bbbbbbbb-bg');
     check(bgs && bgs.background && bgs.state === 'waiting' && bgs.name === 'deploy', 'background sessions show, blocked ones as needing you');
     check(JSON.parse((await getA('/api/session/far-session?m=2060')).body).msgs.some(x => x.text === 'Ship it'), "its session pages open from here");
+    const quiet = JSON.parse((await getA('/api/session/far-session?m=2060')).body).session.activity || {};
+    check(quiet.count === 2 && quiet.now === 'Deploy to production' && quiet.afterYou, `a session working without a word shows what it's doing (${JSON.stringify(quiet)})`);
     check(JSON.parse((await getA('/api/recent?m=2060')).body).some(s => s.id === 'far-session' && s.running), 'and its Resume list');
     check((await getA('/api/state?m=nowhere')).status === 404, 'an unknown computer is 404');
     check((await postAt(B, '/api/end', { id: 'far-session' }, { 'x-forwarded-for': '100.64.0.9', 'tailscale-user-login': 'someone@example.com' })).status === 403,

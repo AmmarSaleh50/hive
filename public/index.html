@@ -197,6 +197,9 @@ h2 { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: u
 .item .block { font-size: 15px; padding: 2px 0 14px; min-width: 0; }
 .item .block.clamp { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); cursor: pointer; }
 .item .block.result { font-size: 16px; }
+.quiet-work .qw { padding-bottom: 8px; min-width: 0; }
+.qw-now { font-size: 15px; font-weight: 600; line-height: 24px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.qw-n { font-size: 13px; line-height: 1.4; }
 .rlabel { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; line-height: 24px; }
 .sess { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
 
@@ -593,20 +596,25 @@ function itemHtml(m, isResult) {
     <div class="block body${isResult ? ' result' : ''}${clamp ? ' clamp' : ''}"${clamp ? ` data-open="${k}"` : ''}>${isResult ? '<div class="rlabel">Result</div>' : ''}${md(m.text)}</div></div>`;
 }
 
-function turnHtml(t) {
+// Working without a word since its last message: what it's doing right now, so the turn doesn't look empty.
+function quietHtml(a) {
+  return `<div class="item quiet-work"><span class="t">${clock(a.at)}</span><span class="node"><i class="cell now"></i></span>
+    <div class="qw"><div class="qw-now">${esc(a.now)}</div><div class="qw-n">${a.count} step${a.count === 1 ? '' : 's'} since ${a.afterYou ? 'you asked' : 'its last message'}</div></div></div>`;
+}
+function turnHtml(t, extra = '') {
   const h = t.asks.map(a => {
     const k = key(a), long = a.text.length > 240 && !open.has(k);
     return `<div class="ask"><span class="t">${clock(a.at)}</span><span class="from">${a.kind === 'answer' ? 'You answered' : 'You asked'}</span>
       <div class="text${long ? ' clamp' : ''}"${long ? ` data-open="${esc(k)}"` : ''}>${esc(a.text).replace(/\n/g, '<br>')}</div></div>`;
   }).join('');
-  return `<div class="turn">${h}${t.items.map(m => itemHtml(m, !!m.final)).join('')}</div>`;
+  return `<div class="turn">${h}${t.items.map(m => itemHtml(m, !!m.final)).join('')}${extra}</div>`;
 }
 
 let limit = 6;
-function timeline(msgs) {
+function timeline(msgs, quiet) {
   const ts = turns(msgs);
   const shown = ts.slice(-limit).reverse();
-  const html = shown.map(turnHtml).join('');
+  const html = shown.map((t, i) => turnHtml(t, i === 0 && quiet ? quietHtml(quiet) : '')).join('') || (quiet ? `<div class="turn">${quietHtml(quiet)}</div>` : '');
   return `<div class="timeline">${html || '<div>No messages yet</div>'}</div>` +
     (ts.length > limit ? `<button class="more" type="button" data-earlier style="margin-top:24px">Show earlier</button>` : '');
 }
@@ -619,7 +627,7 @@ function renderSession(d) {
   return `<div class="view ${cls}">
     <button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button>
     <div class="vtitle"><h1 class="vname">${tag(s.id)}<span>${esc(s.name)}</span></h1><div class="vbtns">${!lastState.canLaunch ? ''
-      : s.state === 'closed' ? `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>` : endBtn(s)}${sumBtn(s)}</div></div>
+      : s.state === 'closed' ? (s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`) : endBtn(s)}${sumBtn(s)}</div></div>
     <div class="status ${cls}">${status}${s.project ? ` in ${esc(s.project)}` : ''}</div>
     ${p ? `<div class="goal">${hex(p.icon)}<span>${esc(p.goal)}</span></div>
       <div class="score"><div class="pct">${p.pct}%</div>${comb(p)}</div>
@@ -628,7 +636,7 @@ function renderSession(d) {
       : '<div class="nowline">Reading this session</div>'}
     ${hist}
     <h2>What it said</h2>
-    ${timeline(d.msgs)}
+    ${timeline(d.msgs, s.activity)}
   </div>`;
 }
 
@@ -709,10 +717,12 @@ function renderResume(state, recent) {
       <div class="rs-main"><div class="name">${tag(s.id)}<span>${esc(s.name)}</span></div><div class="rs-last">${esc(s.last)}</div></div>
       <span class="rs-when">${ago(s.lastAt)}</span>
       ${s.running ? endBtn(state.sessions.find(x => x.id === s.id) || { id: s.id }) : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
-        : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
+        : s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
     </div>`).join('')}${items.length > 5 ? `<button class="more" type="button" data-project="${esc(project)}">${openProjects.has(project) ? 'Show fewer' : `Show ${items.length - 5} more`}</button>` : ''}</section>`).join('');
   return syncCard(state.sync) + routines + (list || '<div class="quiet"><img src="/logo.svg" alt=""><b>No sessions in the last two weeks.</b></div>');
 }
+// While a resume is on its way (on any device): no second press, until it shows up as running.
+const startingBtn = `<button class="sumbtn rs-btn" type="button" disabled>${ic('loader')}<span>Starting…</span></button>`;
 // Ending is for good, so it takes a second press (see the click handler).
 let armed = ''; // the session whose End button waits for its second press
 const endBtn = s => `<button class="sumbtn rs-btn end-btn${armed === s.id ? ' arm' : ''}" type="button" data-end="${esc(s.id)}">${ic('square')}<span>${
@@ -780,7 +790,7 @@ document.addEventListener('click', e => {
   if (mb) return pick(mb.dataset.machine);
   const rs = e.target.closest('[data-resume]');
   if (rs) {
-    rs.disabled = true;
+    rs.disabled = true; rs.innerHTML = startingBtn.replace(/^<button[^>]*>|<\/button>$/g, '');
     // At this screen it opens in a terminal tab; anywhere else it starts in the background, for Remote Control.
     const away = lastState.view !== lastState.machine || !lastState.here;
     return post('/api/resume' + q(), { id: rs.dataset.resume }).then(r => {
