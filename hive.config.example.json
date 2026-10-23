@@ -14,5 +14,23 @@
     { "path": "~/Videos/Clips", "label": "Gameplay" }
   ],
   "tailscale": true,
-  "dataDir": "./data"
+  "dataDir": "./data",
+  "resume": {
+    "days": 14,
+    "command": "claude --resume {id}",
+    "window": "hive"
+  },
+  "routines": [
+    {
+      "name": "Work",
+      "icon": "briefcase",
+      "steps": [
+        { "label": "Docker", "open": "C:/Program Files/Docker/Docker/Docker Desktop.exe", "unlessRunning": "Docker Desktop" },
+        { "label": "Waiting for Docker", "waitFor": "docker info", "timeout": 240 },
+        { "label": "Database", "run": "docker start my-postgres my-redis" },
+        { "label": "API", "tab": { "title": "API", "cwd": "~/code/my-app/backend", "command": "npm run dev" } },
+        { "label": "Web", "tab": { "title": "Web", "cwd": "~/code/my-app/frontend", "command": "npm run dev" } }
+      ]
+    }
+  ]
 }

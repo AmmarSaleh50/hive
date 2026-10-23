@@ -45,6 +45,10 @@ Hive is one page that answers that at a glance.
 
 <p align="center"><img src="docs/screenshots/briefing.png" alt="A briefing: headline, numbers, facts, next step" width="560" /></p>
 
+**Resume with one click.** The **Resume** tab lists your sessions from the last two weeks by project, with your last prompt. Press **Resume** and the session opens in a new tab of one shared terminal window, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back.
+
+**Routines for the start of your day.** One button that starts everything you open before work: Docker and its containers, your dev servers (each in its own terminal tab), the apps you need. Also works from a desktop shortcut. See [Resume and routines](#resume-and-routines).
+
 **On your phone too.** Hive works as a home-screen app, privately over [Tailscale](https://tailscale.com).
 
 <p align="center">
@@ -100,6 +104,44 @@ tailscale serve --bg --https=443 http://127.0.0.1:4747
 
 Now `https://<this-computer>.<your-tailnet>.ts.net` opens Hive on any device signed in to your Tailscale, and nowhere else. Hive accepts that name by itself. On your phone, use "Add to Home Screen" to get it as an app. To stop sharing: `tailscale serve --https=443 off`.
 
+## Resume and routines
+
+Both start things on your computer, so they only show up on the computer Hive runs on, never on your phone or other devices.
+
+**Resume** opens each session with `claude --resume <id>` in a tab of one terminal window called `hive`, so every session you resume lands next to the others. Sessions that are still running say so instead. To add your own flags:
+
+```json
+"resume": { "command": "claude --resume {id} --dangerously-skip-permissions" }
+```
+
+On Windows it uses Windows Terminal and PowerShell, on macOS Terminal, on Linux GNOME Terminal.
+
+**Routines** are lists of steps under one button. A step can open an app, run a command, wait until a command succeeds, or open a terminal tab:
+
+```json
+"routines": [{
+  "name": "Work", "icon": "briefcase",
+  "steps": [
+    { "label": "Docker", "open": "C:/Program Files/Docker/Docker/Docker Desktop.exe", "unlessRunning": "Docker Desktop" },
+    { "label": "Waiting for Docker", "waitFor": "docker info", "timeout": 240 },
+    { "label": "Database", "run": "docker start my-postgres my-redis" },
+    { "label": "API", "tab": { "title": "API", "cwd": "~/code/my-app/backend", "command": "npm run dev" } },
+    { "label": "Web", "tab": { "title": "Web", "cwd": "~/code/my-app/frontend", "command": "npm run dev" } }
+  ]
+}]
+```
+
+| Step | What it does |
+|---|---|
+| `open`, with optional `args`, `cwd`, `unlessRunning` | Starts an app. Skipped when a process called `unlessRunning` is already running. |
+| `run`, with optional `timeout` (seconds) | Runs a command and waits for it. The routine stops if it fails. |
+| `waitFor`, with optional `timeout` (seconds) | Retries a command every 3 seconds until it succeeds. |
+| `tab`: `{ title, cwd, command }` | Opens a tab in the `hive` terminal window. |
+
+`icon` is any [Lucide](https://lucide.dev/icons) icon name. Hive shows which step a routine is on and where it stopped if something failed.
+
+**From a desktop shortcut:** `node /path/to/hive/server.cjs --routine Work` hands the routine to the running Hive (so the page shows its progress), or runs it by itself when Hive isn't running. Add `--dry-run` to only check that every app and folder in it exists.
+
 ## How it works
 
 ```
@@ -136,12 +178,17 @@ Copy `hive.config.example.json` to `hive.config.json` and change what you need. 
 | `clips` | `[]` | Folders of your own videos for the player: `[{ "path": "~/Videos/Clips", "label": "Gameplay" }]` |
 | `tailscale` | `true` | Accept this machine's Tailscale name |
 | `dataDir` | `./data` | Where Hive keeps its own files |
+| `resume.days` | `14` | How far back the Resume list goes |
+| `resume.command` | `claude --resume {id}` | Command a resumed session runs |
+| `resume.window` | `hive` | Name of the terminal window resumed sessions share (Windows Terminal) |
+| `routines` | `[]` | Your routine buttons, see [Resume and routines](#resume-and-routines) |
 
 ## Privacy and cost
 
 - **What leaves your machine:** only the summaries. The recent chat text of a session (never its tool calls or files) goes to Claude Haiku through your own `claude` login, the same way your sessions talk to Claude. Turn it off with `"summaries": { "enabled": false }`.
 - **What it costs:** one update is about 9,000 tokens in and 1,300 out, roughly $0.0025 at API list prices. With a Claude subscription it counts toward your normal usage limits; next to an active Opus session it's around half a percent. `data/usage.jsonl` records every run so you can check.
 - **Who can open it:** only you. Hive listens on loopback, refuses requests for any other host name (so other websites can't reach it), and is only visible to your other devices if you publish it with `tailscale serve`.
+- **Who can start things:** only this computer. Resume and routines run only commands from your own settings file, only for requests from this computer (not from other devices on your tailnet), and only for requests carrying Hive's own header, which other websites can't send.
 
 ## Good to know
 

@@ -3,6 +3,14 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.0 (2026-10-23)
+
+### Added
+
+- **Resume tab.** Your sessions from the last two weeks, by project, with your last prompt. One click reopens a session in a new tab of one shared terminal window, in its folder, with your own command (`resume.command`, e.g. with `--dangerously-skip-permissions`). Closed session pages get a Resume button too.
+- **Routines.** Buttons that start your day: open apps, run commands, wait for something to be ready, open terminal tabs. The page shows which step a routine is on. `node server.cjs --routine <name>` runs one from a desktop shortcut, `--dry-run` checks it.
+- Both only work from the computer Hive runs on, and only for requests carrying Hive's own header.
+
 ## 0.2.2 (2026-10-22)
 
 ### Fixed

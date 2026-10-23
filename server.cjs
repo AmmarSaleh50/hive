@@ -20,12 +20,16 @@ const DEFAULTS = {
   clips: [],           // folders of your own videos for the Stimulation player: [{ "path": "~/Videos/Clips", "label": "Gameplay" }]
   tailscale: true,     // also answer to this machine's Tailscale name (for `tailscale serve`)
   dataDir: './data',   // where Hive keeps its progress cache and Haiku usage log
+  // The Resume list: sessions from the last `days`, reopened with `command` in a tab of one terminal window.
+  resume: { days: 14, command: 'claude --resume {id}', window: 'hive' },
+  // Buttons that start your day: [{ "name": "Work", "icon": "briefcase", "steps": [...] }]; see hive.config.example.json.
+  routines: [],
 };
 function loadConfig() {
   const file = process.env.HIVE_CONFIG || path.join(ROOT, 'hive.config.json');
   let user = {};
   try { user = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.log(`Ignoring ${file}: ${e.message}`); }
-  const c = { ...DEFAULTS, ...user, summaries: { ...DEFAULTS.summaries, ...(user.summaries || {}) } };
+  const c = { ...DEFAULTS, ...user, summaries: { ...DEFAULTS.summaries, ...(user.summaries || {}) }, resume: { ...DEFAULTS.resume, ...(user.resume || {}) } };
   if (process.env.PORT) c.port = +process.env.PORT;
   if (process.env.CLAUDE_DIR) c.claudeDir = process.env.CLAUDE_DIR;
   return c;
@@ -562,6 +566,167 @@ function sendVideo(req, res, file) {
   fs.createReadStream(file, { start, end }).pipe(res);
 }
 
+// ---- Resume and routines: open sessions in terminal tabs, start your day's apps -------------------
+// Recent sessions come straight from the transcripts: their folder, name and your last prompt.
+const recentCache = new Map(); // file -> { key, info }
+function readSlice(file, start, len) {
+  const b = Buffer.alloc(len);
+  const fd = fs.openSync(file, 'r');
+  try { fs.readSync(fd, b, 0, len, start); } finally { fs.closeSync(fd); }
+  return b.toString('utf8').split('\n');
+}
+function promptText(o) {
+  const c = o.message && o.message.content;
+  let t = typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b.type === 'text').map(b => b.text).join(' ') : '';
+  t = t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+  return !t || SKIP_USER.test(t) || t.startsWith('[Request interrupted') ? '' : t.replace(/\s+/g, ' ');
+}
+function sessionInfo(file, st) {
+  const key = st.size + ':' + st.mtimeMs, hit = recentCache.get(file);
+  if (hit && hit.key === key) return hit.info;
+  let cwd = '', first = '', title = '', last = '';
+  for (const l of readSlice(file, 0, Math.min(st.size, 256 * 1024))) {
+    if (cwd && first) break;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    if (!cwd && o.cwd) cwd = o.cwd;
+    if (!first && o.type === 'user' && !o.isSidechain && !o.isMeta) first = promptText(o);
+  }
+  const from = Math.max(0, st.size - 256 * 1024);
+  for (const l of readSlice(file, from, st.size - from)) {
+    if (!l.includes('"custom-title"') && !l.includes('"last-prompt"')) continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    if (o.type === 'custom-title' && o.customTitle) title = o.customTitle;
+    if (o.type === 'last-prompt' && o.lastPrompt) last = String(o.lastPrompt).replace(/\s+/g, ' ');
+  }
+  const info = first ? { cwd, name: title || first.slice(0, 60), last: (last || first).slice(0, 160) } : null; // no prompt = headless run
+  recentCache.set(file, { key, info });
+  return info;
+}
+function recentSessions() {
+  const cutoff = Date.now() - config.resume.days * 86400e3, out = [];
+  for (const d of safeDir(PROJ)) {
+    for (const f of safeDir(path.join(PROJ, d))) {
+      if (!f.endsWith('.jsonl')) continue;
+      const file = path.join(PROJ, d, f);
+      let st; try { st = fs.statSync(file); } catch { continue; }
+      if (st.mtimeMs < cutoff) continue;
+      const info = sessionInfo(file, st);
+      if (!info || !info.cwd) continue;
+      const id = f.slice(0, -6), live = sessions.get(id);
+      out.push({ id, ...info, name: (live && live.running && live.name) || info.name, project: path.basename(info.cwd),
+        lastAt: st.mtimeMs, running: !!(live && live.running), folderExists: fs.existsSync(info.cwd) });
+    }
+  }
+  return out.sort((a, b) => b.lastAt - a.lastAt);
+}
+
+// A tab in one shared terminal window, so every session you resume lands next to the others.
+const fill = (cmd, vars) => cmd.replace(/\{(\w+)\}/g, (m, k) => vars[k] !== undefined ? vars[k] : m);
+function openTab({ title, cwd, command }) {
+  const dir = home(cwd || os.homedir());
+  if (process.platform === 'win32') {
+    const shell = fs.existsSync(path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WindowsApps', 'pwsh.exe')) ? 'pwsh' : 'powershell';
+    // `wt -w <name>` reuses the window with that name. The command goes in encoded, because quotes and ";"
+    // would otherwise be read by wt.exe itself before PowerShell ever sees them.
+    const lit = s => s.replace(/;/g, '\\;'); // a bare ";" would start a new wt command
+    const args = ['-w', config.resume.window, 'new-tab', '--title', lit(title || 'Hive'), '-d', lit(dir),
+      shell, '-NoLogo', '-NoExit', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')];
+    spawn('wt.exe', args, { detached: true, stdio: 'ignore', windowsHide: false }).on('error', e => console.log('Could not open Windows Terminal:', e.message)).unref();
+  } else if (process.platform === 'darwin') {
+    const script = `tell application "Terminal" to do script "cd ${JSON.stringify(dir).slice(1, -1)} && ${command.replace(/"/g, '\\"')}"`;
+    spawn('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate'], { detached: true, stdio: 'ignore' }).unref();
+  } else {
+    spawn('gnome-terminal', ['--tab', `--title=${title || 'Hive'}`, `--working-directory=${dir}`, '--', 'bash', '-lc', `${command}; exec bash`], { detached: true, stdio: 'ignore' })
+      .on('error', () => spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && ${command}; exec bash'`], { detached: true, stdio: 'ignore' }).unref()).unref();
+  }
+}
+function resumeSession(id) {
+  const s = /^[\w-]+$/.test(id) && recentSessions().find(x => x.id === id);
+  if (!s) return 'That session is not in the Resume list.';
+  if (s.running) return 'That session is already running.';
+  if (!s.folderExists) return `Its folder no longer exists: ${s.cwd}`;
+  openTab({ title: s.name.slice(0, 40), cwd: s.cwd, command: fill(config.resume.command, { id }) });
+  return '';
+}
+
+// Routine steps: { open, args, cwd, unlessRunning } starts an app, { run } runs a command and waits for it,
+// { waitFor, timeout } retries a command until it succeeds, { tab: { title, cwd, command } } opens a terminal tab.
+function sh(cmd, timeoutMs = 120e3) {
+  return new Promise(resolve => {
+    const child = spawn(cmd, { shell: true, windowsHide: true, cwd: os.homedir() });
+    let out = '';
+    child.stdout && child.stdout.on('data', d => out += d);
+    child.stderr && child.stderr.on('data', d => out += d);
+    const timer = setTimeout(() => { child.kill(); resolve({ ok: false, out: 'timed out' }); }, timeoutMs);
+    child.on('error', e => { clearTimeout(timer); resolve({ ok: false, out: e.message }); });
+    child.on('close', code => { clearTimeout(timer); resolve({ ok: code === 0, out: out.trim() }); });
+  });
+}
+async function isRunning(name) {
+  if (!name) return false;
+  const r = process.platform === 'win32' ? await sh(`tasklist /FI "IMAGENAME eq ${name.replace(/\.exe$/i, '')}.exe" /NH`, 15e3) : await sh(`pgrep -if "${name}"`, 15e3);
+  return process.platform === 'win32' ? r.out.toLowerCase().includes(name.replace(/\.exe$/i, '').toLowerCase() + '.exe') : r.ok;
+}
+async function openApp(step) {
+  const exe = home(step.open), cwd = home(step.cwd || path.dirname(exe));
+  if (await isRunning(step.unlessRunning)) return 'already running';
+  if (process.platform === 'win32') {
+    // Start-Process handles apps that ask for administrator rights, and sets the working folder.
+    const q = s => `'${String(s).replace(/'/g, "''")}'`;
+    const args = (step.args || []).length ? ` -ArgumentList ${(step.args).map(q).join(',')}` : '';
+    const r = await sh(`powershell -NoProfile -Command "Start-Process -FilePath ${q(exe)} -WorkingDirectory ${q(cwd)}${args}"`, 60e3);
+    if (!r.ok) throw new Error(r.out || 'could not start');
+  } else {
+    spawn(exe, step.args || [], { cwd, detached: true, stdio: 'ignore' }).unref();
+  }
+  return 'started';
+}
+const routine = { name: '', step: 0, total: 0, label: '', error: '', doneAt: 0 };
+async function runRoutine(name, { dryRun = false, log = () => {} } = {}) {
+  const r = (config.routines || []).find(x => x.name.toLowerCase() === String(name).toLowerCase());
+  if (!r) throw new Error(`No routine called "${name}" in hive.config.json`);
+  if (routine.name && !routine.doneAt) throw new Error(`"${routine.name}" is still running`);
+  Object.assign(routine, { name: r.name, step: 0, total: r.steps.length, label: '', error: '', doneAt: 0 });
+  bump();
+  try {
+    for (const [i, step] of r.steps.entries()) {
+      const label = step.label || step.open || step.run || step.waitFor || (step.tab && step.tab.title) || `step ${i + 1}`;
+      Object.assign(routine, { step: i + 1, label }); bump();
+      log(`${i + 1}/${r.steps.length} ${label}`);
+      if (dryRun) {
+        const p = step.open ? home(step.open) : step.tab && step.tab.cwd ? home(step.tab.cwd) : step.cwd ? home(step.cwd) : '';
+        if (p && !fs.existsSync(p)) throw new Error(`${label}: not found: ${p}`);
+        continue;
+      }
+      if (step.open) log('   ' + await openApp(step));
+      else if (step.run) { const x = await sh(step.run, (step.timeout || 120) * 1e3); if (!x.ok) throw new Error(`${label}: ${x.out.split('\n').pop()}`); }
+      else if (step.waitFor) {
+        const until = Date.now() + (step.timeout || 120) * 1e3;
+        while (!(await sh(step.waitFor, 20e3)).ok) {
+          if (Date.now() > until) throw new Error(`${label}: still not ready after ${step.timeout || 120} s`);
+          await new Promise(res => setTimeout(res, 3000));
+        }
+      } else if (step.tab) openTab(step.tab);
+    }
+    Object.assign(routine, { label: 'Done', doneAt: Date.now() });
+  } catch (e) {
+    Object.assign(routine, { error: e.message, doneAt: Date.now() });
+    throw e;
+  } finally { bump(); }
+}
+
+// Launching things is for this computer only: never for other devices on the tailnet, never for other websites.
+let tsIPs = [];
+function fromThisComputer(req) {
+  const a = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  if (a !== '127.0.0.1' && a !== '::1') return false;
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim().replace(/^::ffff:/, '');
+  return !fwd || tsIPs.includes(fwd); // through `tailscale serve`, only this machine's own Tailscale address
+}
+function readBody(req) {
+  return new Promise(resolve => { let b = ''; req.on('data', d => { b += d; if (b.length > 1e4) req.destroy(); }); req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } }); });
+}
+
 // ---- Who may connect --------------------------------------------------------------------------
 // Only answer to our own names, so a web page can't reach the transcripts through DNS rebinding.
 // From other devices Hive is reached only through `tailscale serve`, as https://<machine>.<tailnet>.ts.net.
@@ -575,6 +740,7 @@ function readTailscaleName() {
     try {
       const st = JSON.parse(execFileSync(bin, ['status', '--json'], { windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).toString());
       tsName = String((st.Self && st.Self.DNSName) || '').replace(/\.$/, '').toLowerCase();
+      tsIPs = (st.Self && st.Self.TailscaleIPs) || [];
       if (tsName) return;
     } catch {}
   }
@@ -600,7 +766,23 @@ function handle(req, res) {
     res.writeHead(200, { 'content-type': st[1], 'cache-control': 'no-cache' });
     return fs.createReadStream(path.join(PUBLIC, st[0])).pipe(res);
   }
-  if (u.pathname === '/api/state') return json(res, { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', sessions: list() });
+  if (u.pathname === '/api/state') return json(res, { version, demo: DEMO, secure: tsName ? 'https://' + tsName : '', sessions: list(),
+    canLaunch: fromThisComputer(req) && !DEMO, routines: (config.routines || []).map(r => ({ name: r.name, icon: r.icon || 'rocket' })), routine });
+  if (u.pathname === '/api/recent') return json(res, fromThisComputer(req) && !DEMO ? recentSessions() : []);
+  if (u.pathname === '/api/resume' || u.pathname === '/api/routine') {
+    // Only a JSON POST with our own header: browsers can't send that from another website without asking first.
+    const origin = req.headers.origin ? new URL(req.headers.origin).host : req.headers.host;
+    if (req.method !== 'POST' || req.headers['x-hive'] !== '1' || !String(req.headers['content-type']).startsWith('application/json')
+      || !hostOk(origin) || !fromThisComputer(req) || DEMO) { res.writeHead(403); return res.end(); }
+    return readBody(req).then(body => {
+      if (u.pathname === '/api/resume') { const err = resumeSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
+      const started = runRoutine(String(body.name || ''));
+      started.catch(e => console.log('Routine stopped:', e.message));
+      // A wrong name or a routine that's still going fails right away; anything later shows on the board.
+      Promise.race([started.then(() => ''), new Promise(r => setTimeout(r, 50, ''))]).catch(e => e.message)
+        .then(err => json(res, { ok: !err, error: err }));
+    });
+  }
   // hive.localhost asks this to see whether the secure Tailscale address is reachable before moving there.
   if (u.pathname === '/api/ping') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
@@ -628,6 +810,28 @@ function handle(req, res) {
 }
 
 // ---- Start --------------------------------------------------------------------------------------
+// `node server.cjs --routine Work` runs a routine and exits (for a desktop shortcut); add --dry-run to only check it.
+const ROUTINE_ARG = process.argv.indexOf('--routine');
+if (ROUTINE_ARG > 0) {
+  const name = process.argv[ROUTINE_ARG + 1] || '', dryRun = process.argv.includes('--dry-run');
+  const here = () => runRoutine(name, { dryRun, log: m => console.log(m) })
+    .then(() => { console.log(dryRun ? 'Dry run: every step looks fine.' : 'Done.'); process.exit(0); })
+    .catch(e => { console.log('Stopped: ' + e.message); process.exit(1); });
+  if (dryRun) here();
+  else {
+    // Hand it to the running Hive so the board shows its progress; run it here when Hive isn't running.
+    const body = JSON.stringify({ name });
+    http.request({ host: '127.0.0.1', port: config.port, path: '/api/routine', method: 'POST', timeout: 3000,
+      headers: { 'content-type': 'application/json', 'x-hive': '1', 'content-length': Buffer.byteLength(body) } }, res => {
+      if (res.statusCode !== 200) return here();
+      let b = ''; res.on('data', d => b += d).on('end', () => {
+        const r = (() => { try { return JSON.parse(b); } catch { return {}; } })();
+        console.log(r.ok ? `"${name}" started in Hive.` : 'Stopped: ' + r.error); process.exit(r.ok ? 0 : 1);
+      });
+    }).on('error', here).on('timeout', function () { this.destroy(); }).end(body);
+  }
+  return;
+}
 if (DEMO) {
   // Made-up sessions that play out by themselves: for trying Hive and for the screenshots.
   require('./demo.cjs')({ session, sessions, bump });
