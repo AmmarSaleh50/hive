@@ -153,7 +153,7 @@ On Windows it uses Windows Terminal with PowerShell 7 (or Windows PowerShell whe
 
 `icon` is any [Lucide](https://lucide.dev/icons) icon name. Hive shows which step a routine is on and where it stopped if something failed.
 
-**End session** (on a running session's page and in the Resume list) asks once more, then stops it: a background session with `claude stop`, an interactive one by ending its process. The conversation stays, so you can resume it later. **Send to background** moves a session from its terminal into the background (same id, Remote Control still reaches it), and **Open in terminal** brings a background session back into a terminal tab.
+**End session** (on a running session's page and in the Resume list) asks once more, then stops it: a background session with `claude stop`, an interactive one by ending its process. The conversation stays, so you can resume it later. **Send to background** types Claude Code's own `/bg` into the session's terminal (Windows): it keeps working in the background and the terminal is freed, and **Open in terminal** brings a background session back into a terminal tab.
 
 **From a desktop shortcut:** `node /path/to/hive/server.cjs --routine Work` hands the routine to the running Hive (so the page shows its progress), or runs it by itself when Hive isn't running. Add `--dry-run` to only check that every app and folder in it exists.
 

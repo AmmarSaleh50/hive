@@ -957,7 +957,7 @@ let armed = ''; // the session whose End button waits for its second press
 // A session running in the background has no window: this opens it in a terminal tab on its computer.
 const attachBtn = s => s.background ? `<button class="sumbtn rs-btn" type="button" data-attach="${esc(s.id)}">${ic('terminal')}<span>Open in terminal</span></button>` : '';
 // A session in a terminal, moved to the background (asks once more if it's working: that work stops).
-const bgBtn = s => s.id && !s.background && s.state && s.state !== 'closed' ? `<button class="sumbtn rs-btn${armed === 'bg:' + s.id ? ' arm' : ''}" type="button" data-tobg="${esc(s.id)}"${s.state === 'working' ? ' data-working="1"' : ''}>${ic('arrow-down-to-line')}<span>${armed === 'bg:' + s.id ? "It's working. Move anyway?" : 'Send to background'}</span></button>` : '';
+const bgBtn = s => s.id && !s.background && s.state && s.state !== 'closed' ? `<button class="sumbtn rs-btn" type="button" data-tobg="${esc(s.id)}">${ic('arrow-down-to-line')}<span>Send to background</span></button>` : '';
 const endBtn = s => `<button class="sumbtn rs-btn end-btn${armed === s.id ? ' arm' : ''}" type="button" data-end="${esc(s.id)}">${ic('square')}<span>${
   armed !== s.id ? 'End session' : s.state === 'working' ? "It's working. End anyway?" : 'End it for good?'}</span></button>`;
 // The transfer's status file: running, startedAt, finishedAt, result (ok, partial, error), counts, errors, error.
@@ -1089,13 +1089,11 @@ document.addEventListener('click', e => {
     });
   }
   const tb = e.target.closest('[data-tobg]');
-  if (tb) {
-    clearTimeout(endBtn.timer);
-    if (tb.dataset.working && armed !== 'bg:' + tb.dataset.tobg) { armed = 'bg:' + tb.dataset.tobg; endBtn.timer = setTimeout(() => { armed = ''; refresh(); }, 5000); return refresh(); }
-    armed = ''; tb.disabled = true;
+  if (tb) {                                            // Claude's own /bg: it keeps working, nothing stops
+    tb.disabled = true;
     return post('/api/background' + q(), { id: tb.dataset.tobg }).then(r => {
-      toast(r.ok ? `Running in the background on the ${lastState.view} now. Open it with Remote Control or Open in terminal.` : r.error);
-      setTimeout(refresh, 1500);
+      toast(r.ok ? 'Sent to the background. It keeps working and shows up as a background session in a moment.' : r.error);
+      setTimeout(refresh, 3000);
     });
   }
   const ab = e.target.closest('[data-attach]');

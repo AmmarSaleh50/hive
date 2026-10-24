@@ -931,24 +931,24 @@ function makeFolder(name) {
   return { path: p };
 }
 
-// A session in a terminal, moved to the background: its process ends, then it continues there under the same id
-// (while it's still open anywhere, Claude would only start a copy). Whatever it was doing that second stops; it then
-// waits for your next message, which Remote Control or "Open in terminal" can send.
+// A session in a terminal, sent to the background with Claude Code's own /bg: Hive types it into that terminal, as you
+// would. It keeps working (Claude carries the conversation over to a background session, under a new id) and the
+// terminal is freed. Windows only: typing into another program's console is a Windows feature.
+const TYPE_INTO = path.join(ROOT, 'scripts', 'type-into.ps1');
 async function toBackground(id) {
   const s = sessions.get(id);
   if (!s || !s.running || s.kind === 'background') return 'That is not a session running in a terminal.';
-  const pid = s.pid, cwd = s.cwd || os.homedir(), err = await endSession(id);
-  if (err) return err;
-  for (let i = 0; i < 40 && alive(pid); i++) await new Promise(r => setTimeout(r, 250));
-  let job = null;                                      // ran in the background before: it keeps its own options there
-  try { job = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'jobs', id.slice(0, 8), 'state.json'), 'utf8')); } catch {}
-  const cmd = job && job.sessionId === id ? config.resume.background.replace(/\{id\}.*$/, '{id}') : config.resume.background;
-  const r = await sh(fill(cmd, { id }), 60e3, cwd);
-  setTimeout(tick, 1500);
-  if (!r.ok) return r.out.split('\n').filter(Boolean).pop() || 'It did not start in the background.';
-  const copy = /\bcopy\b/i.test(r.out) && (r.out.match(/claude attach ([0-9a-f]{8})/) || [])[1];
-  if (copy) { await sh(`"${CLAUDE_BIN}" stop ${copy}`, 30e3); await sh(`"${CLAUDE_BIN}" rm ${copy}`, 30e3); return 'Claude would only start a copy, so nothing was started; resume it from Folders.'; }
-  return '';
+  if (process.platform !== 'win32') return 'This works on Windows only; type /bg in its terminal.';
+  // waiting on a question or a permission: what's typed would go to that prompt, so not now
+  if (s.status === 'waiting') return 'It is waiting for your answer. Answer it first, then send it to the background.';
+  const r = await new Promise(res => {
+    const p = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', TYPE_INTO, '-ProcessId', String(+s.pid), '-Text', '/bg'],
+      { windowsHide: true, env: cleanEnv() });
+    let out = ''; p.stdout.on('data', d => out += d); p.stderr.on('data', d => out += d);
+    p.on('error', e => res(e.message)); p.on('close', () => res(out.trim()));
+  });
+  setTimeout(tick, 3000);
+  return r === 'typed' ? '' : (r.replace(/^error: /, '') || 'Could not type /bg into its terminal.');
 }
 
 // A background session, opened in a terminal tab on its computer (it keeps running when the tab closes).

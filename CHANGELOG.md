@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.3 (2026-10-24)
+
+### Changed
+
+- **Send to background uses Claude Code's own `/bg`**: Hive types it into the session's terminal, as you would. The session keeps working, nothing is stopped (Claude carries the conversation over to a background session, under a new id), and the terminal is freed cleanly. Refused while the session waits for your answer, since the typing would go to that prompt. Windows only. The old way (ending the process and resuming) stopped work in progress and could leave the terminal in mouse mode; it's gone.
+
 ## 0.6.2 (2026-10-24)
 
 ### Added
