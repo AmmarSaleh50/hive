@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.4 (2026-10-24)
+
+### Fixed
+
+- **A new session shows under its folder right away**, before its first message (it has no conversation file until then).
+
 ## 0.6.3 (2026-10-24)
 
 ### Changed

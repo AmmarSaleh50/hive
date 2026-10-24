@@ -799,7 +799,12 @@ function folderList() {
   };
   if (WORKSPACE) for (const e of (() => { try { return fs.readdirSync(WORKSPACE, { withFileTypes: true }); } catch { return []; } })())
     if (e.isDirectory() && !e.name.startsWith('.')) group(path.join(WORKSPACE, e.name), e.name);
-  for (const s of recentSessions()) {
+  const listed = recentSessions(), known = new Set(listed.map(s => s.id));
+  // A session that runs but hasn't had a message yet has no conversation file; it still belongs under its folder.
+  for (const s of sessions.values()) if (s.running && s.cwd && !known.has(s.id))
+    listed.unshift({ id: s.id, cwd: s.cwd, name: displayName(s), named: false, last: 'No messages yet', project: path.basename(s.cwd),
+      lastAt: s.startedAt || Date.now(), running: true, starting: false, folderExists: fs.existsSync(s.cwd) });
+  for (const s of listed) {
     const p = path.resolve(s.cwd), rel = inWorkspace(p) ? path.relative(WORKSPACE, p) : '';
     group(p, rel ? rel.split(path.sep).join(' / ') : samePath(p, WORKSPACE) ? path.basename(WORKSPACE) : s.project).sessions.push(s);
   }
