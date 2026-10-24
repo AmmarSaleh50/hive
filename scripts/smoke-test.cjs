@@ -122,6 +122,14 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     check(refused.every(ok => !ok) && !fs.existsSync(path.join(tmp, 'outside')), 'folder names with paths, dots or duplicates are refused');
     const bad = await Promise.all([{}, { folder: '' }, { folder: 'alpha' }, { folder: tmp }, { folder: os.homedir() }].map(async b => JSON.parse((await post('/api/new', b)).body).ok));
     check(bad.every(ok => !ok), 'new sessions only start in a listed folder');
+
+    // Search inside conversations: words must all be there, -words must not.
+    let sr = {};
+    for (let i = 0; i < 50 && !sr.ready; i++) { await new Promise(r => setTimeout(r, 200)); sr = JSON.parse((await get('/api/search?q=' + encodeURIComponent('buttons ROUND'))).body); }
+    const hit = (sr.results || []).find(x => x.id === 'branchy');
+    check(sr.ready && hit && /round/i.test(hit.snippet), `search finds what was said in a session (${JSON.stringify(hit || sr)})`);
+    const none = JSON.parse((await get('/api/search?q=' + encodeURIComponent('buttons -dark'))).body).results.find(x => x.id === 'branchy');
+    check(!none, 'a -word leaves out sessions that contain it');
     check((await post('/api/routine', { name: 'Check' }, { 'x-hive': '' })).status === 403, 'a POST without our header is refused');
     check((await post('/api/routine', { name: 'Check' }, { origin: 'https://evil.example' })).status === 403, 'a POST from another website is refused');
     check((await post('/api/routine', { name: 'Check' }, { 'x-forwarded-for': '100.64.0.9' })).status === 403, 'other devices on the tailnet may not launch');

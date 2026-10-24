@@ -110,11 +110,13 @@ Now `https://<this-computer>.<your-tailnet>.ts.net` opens Hive on any device sig
 
 All of these start things on your computer, so by default they only show up on the computer Hive runs on. To use them from your phone too, see [Two computers](#two-computers).
 
-**Folders** lists your sessions by folder, one accordion each: its newest three sessions, the rest behind "Show more". Every folder has **New session**. Point `workspace` at your folder of projects and the tab lists every folder in it, with all of its sessions however old (folders you haven't used yet too), and lets you make new folders there:
+**Folders** lists your sessions by folder, one accordion each: its newest three sessions, the rest behind "Show more". Every folder has **New session**. Point `workspace` at your folder of projects and the tab lists every folder in it, with all of its sessions however old (folders you haven't used yet too), and lets you make new folders there (**New folder** opens a small window):
 
 ```json
 "workspace": "~/code"
 ```
+
+**Search** (press `/`) finds folders and sessions by name and by your last prompt, forgiving a typo, and looks inside every conversation: what you and Claude said, with the matching line shown. Several words must all match; use `"exact phrases"`, `-word` to leave something out, `in:folder` and `is:running` or `is:closed`. Hive builds its index of the conversations once in the background (about a minute for a few GB of transcripts) and keeps it in `data/`.
 
 **Resume** opens each session with `claude --resume <id>` in a new tab of the terminal window you used last, so every session you resume lands next to your others. Sessions that are still running say so instead. To add your own flags:
 

@@ -3,6 +3,17 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.0 (2026-10-24)
+
+### Added
+
+- **Search on the Folders tab** (`/` to jump in, Esc to clear): folders and sessions by name and last prompt, one typo forgiven, and everything said in every conversation, with the matching line shown and the words marked. All words must match; `"exact phrases"`, `-word`, `in:folder`, `is:running`, `is:closed`. The conversation index is built once in the background and saved in `data/`; after that only new lines are read.
+- **New folder opens a small window** instead of a field above the list.
+
+### Fixed
+
+- On phones, a session with two buttons (Open in terminal, End session) no longer squeezes its name away.
+
 ## 0.5.1 (2026-10-24)
 
 ### Changed

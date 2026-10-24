@@ -820,6 +820,105 @@ async function newSession(folder, mode) {
   if (r.ok) setTimeout(tick, 1500);
   return r.ok ? '' : r.out.split('\n').filter(Boolean).pop() || 'It did not start.';
 }
+// ---- Search inside conversations ----------------------------------------------------------------------------
+// What you and Claude said in every session, as plain text (tool output left out: about 1% of a transcript). Built
+// once in the background, then only new lines are read, since transcripts only grow. Kept in data/search-index.json
+// so a restart doesn't start over.
+const SEARCH_FILE = path.join(DATA, 'search-index.json');
+const fold = t => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); // "Über" finds "uber"
+let searchIdx = { v: 1, files: {} };   // transcript file -> { offset, entries: [[time, "y" | "a", text]] }
+if (!DEMO) try { const x = JSON.parse(fs.readFileSync(SEARCH_FILE, 'utf8')); if (x && x.v === 1 && x.files) searchIdx = x; } catch {}
+const searchLow = new Map();             // file -> all its text, folded, for a quick first check
+const searchState = { building: false, built: Object.keys(searchIdx.files).length > 0, done: 0, total: 0, dirty: false, savedAt: Date.now() };
+function entriesOf(line) {
+  if (line.length > 4e6 || (!line.includes('"type":"user"') && !line.includes('"type":"assistant"'))) return null;
+  let o; try { o = JSON.parse(line); } catch { return null; }
+  if (o.isSidechain || o.isMeta || o.isCompactSummary) return null;
+  const c = o.message && o.message.content, at = Date.parse(o.timestamp) || 0;
+  if (o.type === 'assistant') {
+    if (!Array.isArray(c)) return null;
+    const t = c.filter(b => b.type === 'text').map(b => b.text).join('\n\n').trim()
+      || (o.thinkingDisplay === 'updates' ? c.filter(b => b.type === 'thinking' && b.thinking).map(b => b.thinking).join('\n\n').trim() : '');
+    return t ? [at, 'a', t] : null;
+  }
+  let t = typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b.type === 'text').map(b => b.text).join('\n\n') : '';
+  t = t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+  return !t || SKIP_USER.test(t) || t.startsWith('[Request interrupted') ? null : [at, 'y', t];
+}
+async function indexFile(file, size) {
+  let rec = searchIdx.files[file];
+  if (rec && size < rec.offset) { rec = null; searchLow.delete(file); }   // rewritten: read it again
+  if (!rec) rec = searchIdx.files[file] = { offset: 0, entries: [] };
+  if (size === rec.offset) return;
+  // Pieces of a line are only joined once its end arrives: some lines are megabytes (pictures in tool output), and
+  // gluing every piece onto the growing rest would copy them over and over.
+  let parts = [], partLen = 0, added = '';
+  for await (const chunk of fs.createReadStream(file, { start: rec.offset, end: size - 1, highWaterMark: 4 << 20 })) {
+    const nl = chunk.lastIndexOf(10);
+    if (nl < 0) { parts.push(chunk); partLen += chunk.length; continue; }
+    const buf = parts.length ? Buffer.concat([...parts, chunk.subarray(0, nl)]) : chunk.subarray(0, nl);
+    parts = [chunk.subarray(nl + 1)]; partLen = parts[0].length;
+    for (const l of buf.toString('utf8').split('\n')) {
+      const e = entriesOf(l);
+      if (e) { rec.entries.push(e); added += '\n' + fold(e[2]); }
+    }
+  }
+  rec.offset = size - partLen;                           // an unfinished last line is read next time
+  if (added) { searchLow.set(file, (searchLow.get(file) || '') + added); searchState.dirty = true; }
+}
+async function buildSearch() {
+  if (searchState.building || DEMO) return;
+  searchState.building = true;
+  try {
+    const files = [];
+    for (const d of safeDir(PROJ)) for (const f of safeDir(path.join(PROJ, d))) if (f.endsWith('.jsonl')) files.push(path.join(PROJ, d, f));
+    searchState.total = files.length; searchState.done = 0;
+    for (const file of files) {
+      try { await indexFile(file, fs.statSync(file).size); } catch {}
+      searchState.done++;
+    }
+    for (const file of Object.keys(searchIdx.files)) if (!files.includes(file)) { delete searchIdx.files[file]; searchLow.delete(file); }
+    if (searchState.dirty && Date.now() - searchState.savedAt > 10 * 60e3) saveSearch();
+    searchState.built = true;
+  } finally { searchState.building = false; }
+}
+function saveSearch() {
+  try { fs.writeFileSync(SEARCH_FILE + '.tmp', JSON.stringify(searchIdx)); fs.renameSync(SEARCH_FILE + '.tmp', SEARCH_FILE); searchState.dirty = false; } catch {}
+  searchState.savedAt = Date.now();
+}
+// Words (all must be there), "exact phrases", and -words that must not be.
+function parseQuery(q) {
+  const pos = [], neg = [];
+  for (const m of String(q || '').matchAll(/(-?)"([^"]+)"|(-?)(\S+)/g)) {
+    const minus = m[1] || m[3], t = fold(m[2] || m[4]);
+    if (!m[2] && /^(in|is):/i.test(m[4])) continue;     // filters: the page applies those
+    if (t.length < 2) continue;
+    (minus ? neg : pos).push(t);
+  }
+  return { pos, neg };
+}
+function searchText(q) {
+  const { pos, neg } = parseQuery(q), out = [];
+  if (!pos.length) return out;
+  for (const [file, rec] of Object.entries(searchIdx.files)) {
+    let low = searchLow.get(file);
+    if (low === undefined) { low = rec.entries.map(e => '\n' + fold(e[2])).join(''); searchLow.set(file, low); }
+    if (!pos.every(t => low.includes(t)) || neg.some(t => low.includes(t))) continue;
+    let hits = 0, best = null, bestN = 0;
+    for (const e of rec.entries) {
+      const el = fold(e[2]), n = pos.filter(t => el.includes(t)).length;
+      if (!n) continue;
+      hits += n;
+      if (n > bestN || (n === bestN && e[0] > best[0])) { best = e; bestN = n; }
+    }
+    const i = Math.max(0, fold(best[2]).indexOf(pos.find(t => fold(best[2]).includes(t))));
+    const from = Math.max(0, i - 70), text = best[2];
+    const snippet = (from ? '…' : '') + text.slice(from, i + 150).replace(/\s+/g, ' ').trim() + (i + 150 < text.length ? '…' : '');
+    out.push({ id: path.basename(file, '.jsonl'), hits, at: best[0], role: best[1] === 'y' ? 'you' : 'claude', snippet });
+  }
+  return out.sort((a, b) => b.hits - a.hits || b.at - a.at).slice(0, 80);
+}
+
 // A new folder in the workspace. Names only, no paths: nothing outside the workspace can be made.
 function makeFolder(name) {
   if (!WORKSPACE) return { error: 'No workspace is set up.' };
@@ -1092,6 +1191,8 @@ async function viaPeer(req, res, u, p, mode) {
     const r = await toPeer(p, u.pathname);
     if (!r.ok) { res.writeHead(r.status); return res.end(); }
     return json(res, await r.json());
+  } else if (u.pathname === '/api/search') {
+    return json(res, mode ? await (await toPeer(p, '/api/search?q=' + encodeURIComponent(u.searchParams.get('q') || ''))).json() : { ready: true, results: [] });
   } else if (u.pathname === '/api/folders') {
     return json(res, mode ? await (await toPeer(p, '/api/folders')).json() : { workspace: '', folders: [] });
   } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach'].includes(u.pathname)) {
@@ -1137,6 +1238,12 @@ function handle(req, res) {
   if (u.pathname === '/api/state') return json(res, localState(mode));
   if (u.pathname === '/api/recent') return json(res, mode ? recentSessions() : []);
   if (u.pathname === '/api/folders') return json(res, mode ? folderList() : { workspace: '', folders: [] });
+  if (u.pathname === '/api/search') {
+    if (!mode) return json(res, { ready: true, results: [] });
+    buildSearch(); // catch up on new lines first time round; cheap when nothing changed
+    return json(res, { ready: searchState.built, done: searchState.done, total: searchState.total, // later passes only add new lines
+      results: searchText(u.searchParams.get('q')) });
+  }
   if (LAUNCH) {
     return readBody(req).then(async body => {
       if (u.pathname === '/api/resume') { const err = await resumeSession(String(body.id || ''), mode); return json(res, { ok: !err, error: err }); }
@@ -1220,6 +1327,8 @@ if (DEMO) {
   setInterval(tick, 1000);
   setInterval(scanClosed, 60e3);
   setInterval(watchSync, 2000);
+  setTimeout(buildSearch, 5000);           // after startup work; then every minute for new lines
+  setInterval(buildSearch, 60e3);
 }
 if (peers.length && !DEMO) { pingPeers(); setInterval(pingPeers, 10e3); }
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25e3);

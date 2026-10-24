@@ -150,6 +150,32 @@ nav button.on { border-color: var(--fg); }
 .fold-body .rs-row { background: var(--bg); }
 .fold-body .more { margin: 2px 0 0 4px; }
 .fold-empty { font-size: 14px; padding: 2px 8px 4px; }
+/* Search bar, results, and the New folder window */
+#flist { display: flex; flex-direction: column; gap: 10px; }
+.sbar { display: flex; gap: 8px; }
+.sfield { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: var(--row); border: 1px solid var(--edge);
+  border-radius: 14px; padding: 0 12px 0 14px; cursor: text; }
+.sfield:focus-within { border-color: var(--fg); }
+.sfield .li { width: 18px; height: 18px; flex: none; }
+.sfield input { flex: 1; min-width: 0; background: none; border: 0; color: var(--fg); font: inherit; font-size: 15px; padding: 12px 0; outline: none; }
+.sfield input::placeholder { color: var(--fg); opacity: 1; }
+.sfield input::-webkit-search-cancel-button { filter: invert(1); cursor: pointer; }
+.sfield kbd { font: 600 12px/1 var(--mono); border: 1px solid var(--edge); border-radius: 6px; padding: 4px 7px; }
+.sfield:focus-within kbd { display: none; }
+.s-head { font-size: 14px; font-weight: 600; display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; margin: 4px 0 0 4px; }
+.s-wait { font-weight: 500; color: var(--honey); }
+mark { background: var(--honey); color: var(--bg); border-radius: 3px; padding: 0 1px; }
+.rs-hit { font-size: 14px; line-height: 1.45; margin-top: 6px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.label.sub { margin-top: 16px; }
+.fold-btn:disabled { cursor: default; }
+#mkdlg { width: min(440px, calc(100vw - 32px)); }
+.mkd { padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 16px; }
+.mk-title { font-size: 19px; font-weight: 700; }
+.mk-btns { display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
+.mk-in { background: var(--bg); border: 1px solid var(--edge); border-radius: 12px; padding: 11px 14px; color: var(--fg); font: inherit; font-size: 16px; }
+.mk-in::placeholder { color: var(--fg); opacity: 1; }
+.mk-in:focus { outline: none; border-color: var(--fg); }
 .mk { display: flex; gap: 8px; }
 .mk input { flex: 1; min-width: 0; background: var(--row); border: 1px solid var(--edge); border-radius: 14px; padding: 11px 16px; color: var(--fg); font: inherit; font-size: 15px; }
 .mk input::placeholder { color: var(--fg); opacity: 1; }
@@ -365,7 +391,11 @@ nav button.stimbtn.on { border-color: var(--honey); }
   header { margin-bottom: 22px; gap: 10px; flex-wrap: wrap; }
   .msw { order: 3; width: 100%; margin: 4px 0 0; }
   .new-btn { min-width: 0; padding: 7px 10px; }
-  .new-btn span { display: none; } /* just the + on a phone */
+  .new-btn span, .mk-open span { display: none; } /* just the icon on a phone */
+  .rs-row > span.rs-acts { grid-column: 1 / -1; grid-row: 3; justify-content: flex-start; margin-top: 4px; } /* two buttons get a row of their own */
+  .mk-open { min-width: 0; padding: 7px 13px; }
+  .sfield kbd { display: none; }
+  .sfield input { font-size: 16px; } /* below 16px iPhones zoom in on focus */
   .fold-meta .w, .fold-parent { display: none; }
   .fold-meta { gap: 8px; }
   .fold-head { padding-right: 8px; }
@@ -444,6 +474,14 @@ nav button.stimbtn.on { border-color: var(--honey); }
   <i class="grip ne" data-grip="ne"></i><i class="grip nw" data-grip="nw"></i><i class="grip se" data-grip="se"></i><i class="grip sw" data-grip="sw"></i>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
+<dialog id="mkdlg" aria-labelledby="mk-title">
+  <form class="mkd" data-mkdir>
+    <div class="mk-title" id="mk-title">New folder</div>
+    <input class="mk-in" name="n" type="text" placeholder="Folder name" autocomplete="off" maxlength="80" spellcheck="false" aria-label="Folder name">
+    <div class="mk-btns"><button class="dclose" type="button" data-mkclose>Cancel</button>
+      <button class="sumbtn rs-btn" type="submit"><i data-lucide="folder-plus" class="li" aria-hidden="true"></i><span>Create</span></button></div>
+  </form>
+</dialog>
 <dialog id="sum" aria-labelledby="sum-goal">
   <div class="dhead"><div><div class="name" id="sum-name"></div><div class="goal" id="sum-goal"></div></div><button class="dclose" type="button" data-close>Close</button></div>
   <div class="dbody body" id="sum-body" tabindex="-1" autofocus></div>
@@ -762,32 +800,142 @@ function renderResume(state, data) {
   const routines = state.routines.length ? `<section class="group"><div class="label">Routines</div>
     <div class="rt-row">${state.routines.map(x => `<button class="rt-btn" type="button" data-routine="${esc(x.name)}"${rt.name === x.name && !rt.doneAt ? ' disabled' : ''}>${ic(x.icon)}<span>${esc(x.name)}</span></button>`).join('')}</div>
     ${status}</section>` : '';
-  const row = s => `<div class="rs-row">
-      <div class="rs-main"><div class="name">${tag(s.id)}<span>${esc(s.name)}</span></div><div class="rs-last">${esc(s.last)}</div></div>
+  folderData = data;
+  const bar = `<div class="sbar">
+      <label class="sfield">${ic('search')}<input id="fsearch" type="search" value="${esc(searchQ)}" placeholder="Search folders, sessions and what was said"
+        autocomplete="off" spellcheck="false" enterkeyhint="search" aria-label="Search"><kbd>/</kbd></label>
+      ${data.workspace ? `<button class="sumbtn rs-btn mk-open" type="button" data-mkopen>${ic('folder-plus')}<span>New folder</span></button>` : ''}
+    </div>`;
+  return syncCard(state.sync) + routines + `<section class="group"><div class="label">${esc(data.workspace || 'Folders')}</div>${bar}
+    <div id="flist">${folderListHtml(state, data)}</div></section>`;
+}
+
+// ---- Folders: accordions, and search ----
+let folderData = null, searchQ = '', contentHits = { q: '', map: new Map(), ready: true, done: 0, total: 0 };
+const fold1 = t => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function sessionRow(state, s, hit, terms) {
+  const live = state.sessions.find(x => x.id === s.id) || { id: s.id };
+  return `<div class="rs-row">
+      <div class="rs-main"><div class="name">${tag(s.id)}<span>${mark(s.name, terms)}</span></div><div class="rs-last">${mark(s.last, terms)}</div>
+        ${hit ? `<div class="rs-hit"><b>${hit.role === 'you' ? 'You' : 'Claude'}, ${ago(hit.at)}:</b> ${mark(hit.snippet, terms)}</div>` : ''}</div>
       <span class="rs-when">${ago(s.lastAt)}</span>
-      ${s.running ? `<span class="rs-acts">${attachBtn(state.sessions.find(x => x.id === s.id) || {})}${endBtn(state.sessions.find(x => x.id === s.id) || { id: s.id })}</span>` : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
+      ${s.running ? `<span class="rs-acts">${attachBtn(live)}${endBtn(live)}</span>` : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
         : s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
     </div>`;
-  // One accordion per folder: its newest 3 sessions, the rest behind "Show more".
-  const fold = f => {
-    const open = isFoldOpen(f), all = openProjects.has(f.path), n = f.sessions.length;
-    return `<section class="fold${open ? ' open' : ''}">
-      <div class="fold-head">
-        <button class="fold-btn" type="button" data-fold="${esc(f.path)}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right')}${ic(open ? 'folder-open' : 'folder', 'fi')}
-          <span class="fold-name">${f.name.includes(' / ') ? `<span class="fold-parent">${esc(f.name.slice(0, f.name.lastIndexOf(' / ') + 3))}</span>` : ''}${esc(f.name.split(' / ').pop())}</span>
-          <span class="fold-meta">${n ? `${n}<span class="w"> session${n === 1 ? '' : 's'}</span>` : ''}${f.running ? `<span class="fold-on">${f.running}<span class="w"> running</span></span>` : ''}</span></button>
-        ${f.exists ? `<button class="sumbtn rs-btn new-btn" type="button" data-new="${esc(f.path)}" aria-label="New session in ${esc(f.name)}">${ic('plus')}<span>New session</span></button>` : ''}
-      </div>
-      ${open ? `<div class="fold-body">${f.sessions.slice(0, all ? n : 3).map(row).join('') || '<div class="fold-empty">No sessions here yet.</div>'}
-        ${n > 3 ? `<button class="more" type="button" data-project="${esc(f.path)}">${all ? 'Show fewer' : `Show ${n - 3} more`}</button>` : ''}</div>` : ''}
-    </section>`;
-  };
-  const mine = data.folders.filter(f => f.inWorkspace), other = data.folders.filter(f => !f.inWorkspace);
-  const make = data.workspace ? `<form class="mk" data-mkdir><input name="n" type="text" placeholder="New folder in ${esc(data.workspace)}" autocomplete="off" maxlength="80" spellcheck="false" aria-label="New folder name">
-    <button class="sumbtn rs-btn" type="submit">${ic('folder-plus')}<span>Create</span></button></form>` : '';
-  const list = (mine.length || make ? `<section class="group"><div class="label">${esc(data.workspace || 'Folders')}</div>${make}${mine.map(fold).join('')}</section>` : '')
-    + (other.length ? `<section class="group"><div class="label">${data.workspace ? 'Other folders' : 'Folders'}</div>${other.map(fold).join('')}</section>` : '');
-  return syncCard(state.sync) + routines + (list || '<div class="quiet"><img src="/logo.svg" alt=""><b>No sessions in the last two weeks.</b></div>');
+}
+// One accordion per folder: its newest 3 sessions, the rest behind "Show more". While searching: open, matches only.
+function foldHtml(state, f, list, opts = {}) {
+  const open = opts.search || isFoldOpen(f), limit = opts.search ? 5 : 3, all = openProjects.has(f.path), n = list.length;
+  return `<section class="fold${open ? ' open' : ''}">
+    <div class="fold-head">
+      <button class="fold-btn" type="button" data-fold="${esc(f.path)}" aria-expanded="${open}"${opts.search ? ' disabled' : ''}>${ic(open ? 'chevron-down' : 'chevron-right')}${ic(open ? 'folder-open' : 'folder', 'fi')}
+        <span class="fold-name">${f.name.includes(' / ') ? `<span class="fold-parent">${mark(f.name.slice(0, f.name.lastIndexOf(' / ') + 3), opts.terms)}</span>` : ''}${mark(f.name.split(' / ').pop(), opts.terms)}</span>
+        <span class="fold-meta">${n ? `${n}<span class="w"> ${opts.search ? 'found' : `session${n === 1 ? '' : 's'}`}</span>` : ''}${f.running ? `<span class="fold-on">${f.running}<span class="w"> running</span></span>` : ''}</span></button>
+      ${f.exists ? `<button class="sumbtn rs-btn new-btn" type="button" data-new="${esc(f.path)}" aria-label="New session in ${esc(f.name)}">${ic('plus')}<span>New session</span></button>` : ''}
+    </div>
+    ${open ? `<div class="fold-body">${list.slice(0, all ? n : limit).map(s => sessionRow(state, s, opts.hits && opts.hits.get(s.id), opts.terms)).join('') || '<div class="fold-empty">No sessions here yet.</div>'}
+      ${n > limit ? `<button class="more" type="button" data-project="${esc(f.path)}">${all ? 'Show fewer' : `Show ${n - limit} more`}</button>` : ''}</div>` : ''}
+  </section>`;
+}
+function folderListHtml(state, data) {
+  const q = parseSearch(searchQ);
+  if (!q.active) {
+    const mine = data.folders.filter(f => f.inWorkspace), other = data.folders.filter(f => !f.inWorkspace);
+    return (mine.map(f => foldHtml(state, f, f.sessions)).join('') || (data.workspace ? '' : '<div class="fold-empty">No sessions in the last two weeks.</div>'))
+      + (other.length ? `<div class="label sub">${data.workspace ? 'Other folders' : ''}</div>${other.map(f => foldHtml(state, f, f.sessions)).join('')}` : '');
+  }
+  // Searching: a folder whose name matches shows all its sessions; otherwise only sessions that match by name, last
+  // prompt, or anything said in them (from the server's index).
+  const terms = q.pos.map(x => x.t), hits = contentHits.q === searchQ ? contentHits.map : new Map();
+  const found = [];
+  for (const f of data.folders) {
+    const fname = fold1(f.name);
+    if (q.inF.length && !q.inF.every(t => fname.includes(t))) continue;
+    const folderHit = q.pos.length > 0 && q.pos.every(x => matches(x, fname)) && !q.neg.some(t => fname.includes(t));
+    const list = [];
+    for (const s of f.sessions) {
+      if (q.is.length && !q.is.every(t => isFilter(t, s))) continue;
+      const hay = fold1(`${s.name} ${s.last} ${f.name}`);
+      if (q.neg.some(t => hay.includes(t))) continue;
+      const own = q.pos.every(x => matches(x, hay)), hit = hits.get(s.id);
+      if (!folderHit && !own && !hit && q.pos.length) continue;
+      const nameScore = q.pos.reduce((a, x) => a + (fold1(s.name).includes(x.t) ? 6 : matches(x, fold1(s.name)) ? 3 : matches(x, hay) ? 1 : 0), 0);
+      list.push({ s, score: nameScore + (hit ? Math.min(hit.hits, 12) / 2 : 0) + (s.running ? 1 : 0) });
+    }
+    list.sort((a, b) => b.score - a.score || b.s.lastAt - a.s.lastAt);
+    if (list.length || (folderHit && !q.is.length)) found.push({ f, list: list.map(x => x.s), score: (folderHit ? 50 : 0) + (list[0] ? list[0].score : 0) });
+  }
+  found.sort((a, b) => b.score - a.score || (b.f.lastAt - a.f.lastAt));
+  const n = found.reduce((a, x) => a + x.list.length, 0);
+  const pending = q.pos.length && (contentHits.q !== searchQ || !contentHits.ready);
+  const head = `<div class="s-head">${n ? `${n} session${n === 1 ? '' : 's'} in ${found.length} folder${found.length === 1 ? '' : 's'}` : found.length ? `${found.length} folder${found.length === 1 ? '' : 's'}` : 'Nothing found'}${
+    pending ? `<span class="s-wait">${contentHits.total && !contentHits.ready ? `reading old conversations, ${contentHits.done} of ${contentHits.total}` : 'searching inside conversations'}</span>` : ''}</div>`;
+  return head + found.map(x => foldHtml(state, x.f, x.list, { search: true, terms, hits })).join('');
+}
+// Words (all must match), "exact phrases", -words to leave out, in:folder, is:running / is:closed.
+function parseSearch(text) {
+  const q = { pos: [], neg: [], inF: [], is: [], active: !!String(text).trim() };
+  for (const m of String(text).matchAll(/(-?)"([^"]+)"|(-?)(\S+)/g)) {
+    const minus = m[1] || m[3], raw = m[2] || m[4];
+    const flt = !m[2] && /^(in|is):(.+)$/i.exec(raw);
+    if (flt) { (flt[1].toLowerCase() === 'in' ? q.inF : q.is).push(fold1(flt[2])); continue; }
+    const t = fold1(raw);
+    if (t) (minus ? q.neg : q.pos).push({ t, phrase: !!m[2] });
+  }
+  return q;
+}
+const isFilter = (t, s) => /^(running|open|on|live)$/.test(t) ? s.running : /^(closed|off|done)$/.test(t) ? !s.running : true;
+// A word is found where it's written, at the start of a longer word, or with one typo (two in long words).
+function matches(x, hay) {
+  if (hay.includes(x.t)) return true;
+  if (x.phrase || x.t.length < 4) return false;
+  const max = x.t.length >= 8 ? 2 : 1;
+  return hay.split(/[^a-z0-9]+/).some(w => w.length >= x.t.length - max && (typo(w.slice(0, x.t.length + max), x.t) <= max || typo(w, x.t) <= max));
+}
+function typo(a, b) { // edits between two words (swapped letters count once)
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+// The words you searched for, marked where they appear.
+function mark(text, terms) {
+  text = String(text || '');
+  if (!terms || !terms.length) return esc(text);
+  const low = fold1(text), ranges = [];
+  if (low.length === text.length) for (const t of terms) for (let i = low.indexOf(t); i >= 0; i = low.indexOf(t, i + t.length)) ranges.push([i, i + t.length]);
+  if (!ranges.length) return esc(text);
+  ranges.sort((a, b) => a[0] - b[0]);
+  let out = '', at = 0;
+  for (const [a, b] of ranges) { if (a < at) continue; out += esc(text.slice(at, a)) + '<mark>' + esc(text.slice(a, b)) + '</mark>'; at = b; }
+  return out + esc(text.slice(at));
+}
+// Live: the list follows each keystroke; what was said is asked of the server a moment after you stop typing.
+let searchTimer = null;
+function onSearchInput(value) {
+  searchQ = value;
+  redrawFolders();
+  clearTimeout(searchTimer);
+  if (!parseSearch(value).pos.length) return;
+  searchTimer = setTimeout(askServer, 220);
+}
+async function askServer() {
+  const asked = searchQ;
+  try {
+    const r = await (await fetch('/api/search' + (q() ? q() + '&' : '?') + 'q=' + encodeURIComponent(asked))).json();
+    if (asked !== searchQ) return;
+    contentHits = { q: asked, map: new Map((r.results || []).map(x => [x.id, x])), ready: r.ready !== false, done: r.done || 0, total: r.total || 0 };
+    redrawFolders();
+    if (r.ready === false) searchTimer = setTimeout(askServer, 2000); // the index is still being built
+  } catch {}
+}
+function redrawFolders() {
+  const el = document.getElementById('flist');
+  if (el && folderData) { el.innerHTML = folderListHtml(lastState, folderData); drawIcons(); }
 }
 // Folders you opened or closed stay that way (on this device); others open when something happened there lately.
 let folds = {};
@@ -858,22 +1006,45 @@ async function refresh() {
 }
 document.addEventListener('selectionchange', () => { if (pending && !String(getSelection())) refresh(); });
 
-// A new folder in the workspace; it opens, ready for "New session".
+// A new folder in the workspace, from its small window; it opens, ready for "New session".
+const mkdlg = document.getElementById('mkdlg');
+function openMk() {
+  document.getElementById('mk-title').textContent = `New folder in ${(folderData && folderData.workspace) || 'your workspace'}`;
+  mkdlg.querySelector('input').value = '';
+  mkdlg.showModal();
+  mkdlg.querySelector('input').focus();
+}
+mkdlg.addEventListener('click', e => { if (e.target === mkdlg || e.target.closest('[data-mkclose]')) mkdlg.close(); });
 document.addEventListener('submit', e => {
   const form = e.target.closest('[data-mkdir]');
   if (!form) return;
   e.preventDefault();
-  const input = form.querySelector('input'), name = input.value.trim();
-  if (!name) return;
-  form.querySelector('button').disabled = true;
+  const input = form.querySelector('input'), name = input.value.trim(), btn = form.querySelector('[type=submit]');
+  if (!name) return input.focus();
+  btn.disabled = true;
   post('/api/mkdir' + q(), { name }).then(r => {
-    form.querySelector('button').disabled = false;
-    if (!r.ok) return toast(r.error);
-    input.value = ''; input.blur();
+    btn.disabled = false;
+    if (!r.ok) { toast(r.error); return input.focus(); }
+    mkdlg.close();
     setFold(r.path, true);
     toast(`Made ${name}`);
     refresh();
   });
+});
+
+// Search: "/" jumps into it, Esc empties it.
+document.addEventListener('input', e => { if (e.target.id === 'fsearch') onSearchInput(e.target.value); });
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (t.id === 'fsearch') {
+    if (e.key === 'Escape') { t.value = ''; onSearchInput(''); t.blur(); }
+    if (e.key === 'Enter') t.blur(); // closes the keyboard on a phone
+    return;
+  }
+  if (e.key === '/' && !/^(INPUT|TEXTAREA)$/.test(t.tagName) && !document.querySelector('dialog[open]')) {
+    const box = document.getElementById('fsearch');
+    if (box) { e.preventDefault(); box.focus(); box.select(); }
+  }
 });
 
 document.addEventListener('click', e => {
@@ -886,6 +1057,7 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-earlier]')) { limit += 6; return refresh(); }
   const pj = e.target.closest('[data-project]');
   if (pj) { const k = pj.dataset.project; openProjects.has(k) ? openProjects.delete(k) : openProjects.add(k); return refresh(); }
+  if (e.target.closest('[data-mkopen]')) return openMk();
   const fb = e.target.closest('[data-fold]');
   if (fb) { setFold(fb.dataset.fold, fb.getAttribute('aria-expanded') !== 'true'); return refresh(); }
   const nb = e.target.closest('[data-new]');
