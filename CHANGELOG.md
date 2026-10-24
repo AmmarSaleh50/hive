@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.2 (2026-10-24)
+
+### Added
+
+- **The Transfer card lists what a transfer had to decide** when both laptops changed something (both versions kept, branches brought in from the other laptop), for a week, and says when the other laptop's changes were last fetched. Status file fields `notes`, `notesAt` and `lastPull`.
+
 ## 0.6.1 (2026-10-24)
 
 ### Added

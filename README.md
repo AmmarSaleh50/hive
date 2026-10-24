@@ -175,7 +175,7 @@ With `"launchFrom": "my-devices"` your own devices may resume, end and run thing
 "sync": { "label": "Transfer now", "command": "node sync.cjs now", "status": "~/sync/status.json" }
 ```
 
-The status file can hold `running`, `startedAt`, `finishedAt`, `result` (`ok`, `partial` or `error`), `counts` (`pushed`, `pulled`), `errors` and `error`.
+The status file can hold `running`, `startedAt`, `finishedAt`, `result` (`ok`, `partial` or `error`), `counts` (`pushed`, `pulled`), `errors`, `error`, `lastPull` (when the other side's changes last came in), and `notes` with `notesAt` (what the transfer had to decide, shown for a week).
 
 ## How it works
 
