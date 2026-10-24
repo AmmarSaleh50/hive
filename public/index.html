@@ -135,6 +135,24 @@ nav button.on { border-color: var(--fg); }
 .rs-btn:disabled { cursor: default; border-color: var(--fg); }
 .rs-on { min-width: 104px; text-align: center; font-size: 13px; font-weight: 600; color: var(--honey); }
 .vbtns { display: flex; gap: 8px; flex: none; }
+/* Folders: one accordion each */
+.fold { border: 1px solid var(--edge); border-radius: 14px; background: var(--row); }
+.fold-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; }
+.fold-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px; text-align: left; border-radius: 10px; }
+.fold-btn .li { width: 17px; height: 17px; }
+.fold-btn .fi { color: var(--honey); }
+.fold-name { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold-meta { margin-left: auto; padding-left: 10px; font: 500 13px var(--mono); white-space: nowrap; display: flex; gap: 12px; }
+.fold-on { color: var(--honey); }
+.fold-parent { font-weight: 400; }
+.fold-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.fold-body .rs-row { background: var(--bg); }
+.fold-body .more { margin: 2px 0 0 4px; }
+.fold-empty { font-size: 14px; padding: 2px 8px 4px; }
+.mk { display: flex; gap: 8px; }
+.mk input { flex: 1; min-width: 0; background: var(--row); border: 1px solid var(--edge); border-radius: 14px; padding: 11px 16px; color: var(--fg); font: inherit; font-size: 15px; }
+.mk input::placeholder { color: var(--fg); opacity: 1; }
+.mk input:focus { outline: none; border-color: var(--fg); }
 .end-btn.arm { border-color: var(--red); color: var(--red); }
 .rt-status .bad { color: var(--red); }
 /* The computer switch: which laptop's sessions you're looking at */
@@ -345,6 +363,13 @@ nav button.stimbtn.on { border-color: var(--honey); }
   body { padding-top: 14px; }
   header { margin-bottom: 22px; gap: 10px; flex-wrap: wrap; }
   .msw { order: 3; width: 100%; margin: 4px 0 0; }
+  .new-btn { min-width: 0; padding: 7px 10px; }
+  .new-btn span { display: none; } /* just the + on a phone */
+  .fold-meta .w, .fold-parent { display: none; }
+  .fold-meta { gap: 8px; }
+  .fold-head { padding-right: 8px; }
+  .fold-body { padding: 0 8px 8px; }
+  .mk input { font-size: 16px; } /* below 16px iPhones zoom in on focus */
   .msw button { flex: 1; justify-content: center; padding: 9px 14px; }
   .brand span { font-size: 19px; }
   nav { gap: 16px; }
@@ -395,7 +420,7 @@ nav button.stimbtn.on { border-color: var(--honey); }
     <div class="msw" id="msw" role="tablist" aria-label="Computer" hidden></div>
     <nav>
       <button id="tab-board" class="on" type="button" data-go="">Progress</button>
-      <button id="tab-resume" type="button" data-go="resume" hidden>Resume</button>
+      <button id="tab-resume" type="button" data-go="resume" hidden>Folders</button>
       <button id="tab-stim" class="stimbtn" type="button" aria-label="Stimulation"><span class="navlabel">Stimulation</span><svg class="navicon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg></button>
     </nav>
   </header>
@@ -714,7 +739,7 @@ async function load() {
     const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)) + q());
     app.innerHTML = res.ok ? renderSession(await res.json()) : '<div class="view"><button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button><div class="nowline">That session has left the hive.</div></div>';
   } else if (r === 'resume' && state.canLaunch) {
-    app.innerHTML = renderResume(state, await (await fetch('/api/recent' + q())).json());
+    app.innerHTML = renderResume(state, await (await fetch('/api/folders' + q())).json());
   } else {
     app.innerHTML = renderBoard(state);
   }
@@ -727,7 +752,7 @@ function ago(t) {
   return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
 }
 const openProjects = new Set(); // projects whose full list you opened
-function renderResume(state, recent) {
+function renderResume(state, data) {
   const rt = state.routine || {};
   const stale = rt.doneAt && Date.now() - rt.doneAt > (rt.error ? 60 : 10) * 60e3; // old news after a while
   const status = !rt.name || stale ? '' : rt.error ? `<div class="rt-status bad">${esc(rt.name)} stopped: ${esc(rt.error)}</div>`
@@ -736,16 +761,42 @@ function renderResume(state, recent) {
   const routines = state.routines.length ? `<section class="group"><div class="label">Routines</div>
     <div class="rt-row">${state.routines.map(x => `<button class="rt-btn" type="button" data-routine="${esc(x.name)}"${rt.name === x.name && !rt.doneAt ? ' disabled' : ''}>${ic(x.icon)}<span>${esc(x.name)}</span></button>`).join('')}</div>
     ${status}</section>` : '';
-  const groups = new Map();
-  for (const s of recent) { if (!groups.has(s.project)) groups.set(s.project, []); groups.get(s.project).push(s); }
-  const list = [...groups].map(([project, items]) => `<section class="group"><div class="label">${esc(project)}</div>
-    ${items.slice(0, openProjects.has(project) ? items.length : 5).map(s => `<div class="rs-row">
+  const row = s => `<div class="rs-row">
       <div class="rs-main"><div class="name">${tag(s.id)}<span>${esc(s.name)}</span></div><div class="rs-last">${esc(s.last)}</div></div>
       <span class="rs-when">${ago(s.lastAt)}</span>
       ${s.running ? endBtn(state.sessions.find(x => x.id === s.id) || { id: s.id }) : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
         : s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
-    </div>`).join('')}${items.length > 5 ? `<button class="more" type="button" data-project="${esc(project)}">${openProjects.has(project) ? 'Show fewer' : `Show ${items.length - 5} more`}</button>` : ''}</section>`).join('');
+    </div>`;
+  // One accordion per folder: its newest 3 sessions, the rest behind "Show more".
+  const fold = f => {
+    const open = isFoldOpen(f), all = openProjects.has(f.path), n = f.sessions.length;
+    return `<section class="fold${open ? ' open' : ''}">
+      <div class="fold-head">
+        <button class="fold-btn" type="button" data-fold="${esc(f.path)}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right')}${ic(open ? 'folder-open' : 'folder', 'fi')}
+          <span class="fold-name">${f.name.includes(' / ') ? `<span class="fold-parent">${esc(f.name.slice(0, f.name.lastIndexOf(' / ') + 3))}</span>` : ''}${esc(f.name.split(' / ').pop())}</span>
+          <span class="fold-meta">${n ? `${n}<span class="w"> session${n === 1 ? '' : 's'}</span>` : ''}${f.running ? `<span class="fold-on">${f.running}<span class="w"> running</span></span>` : ''}</span></button>
+        ${f.exists ? `<button class="sumbtn rs-btn new-btn" type="button" data-new="${esc(f.path)}" aria-label="New session in ${esc(f.name)}">${ic('plus')}<span>New session</span></button>` : ''}
+      </div>
+      ${open ? `<div class="fold-body">${f.sessions.slice(0, all ? n : 3).map(row).join('') || '<div class="fold-empty">No sessions here yet.</div>'}
+        ${n > 3 ? `<button class="more" type="button" data-project="${esc(f.path)}">${all ? 'Show fewer' : `Show ${n - 3} more`}</button>` : ''}</div>` : ''}
+    </section>`;
+  };
+  const mine = data.folders.filter(f => f.inWorkspace), other = data.folders.filter(f => !f.inWorkspace);
+  const make = data.workspace ? `<form class="mk" data-mkdir><input name="n" type="text" placeholder="New folder in ${esc(data.workspace)}" autocomplete="off" maxlength="80" spellcheck="false" aria-label="New folder name">
+    <button class="sumbtn rs-btn" type="submit">${ic('folder-plus')}<span>Create</span></button></form>` : '';
+  const list = (mine.length || make ? `<section class="group"><div class="label">${esc(data.workspace || 'Folders')}</div>${make}${mine.map(fold).join('')}</section>` : '')
+    + (other.length ? `<section class="group"><div class="label">${data.workspace ? 'Other folders' : 'Folders'}</div>${other.map(fold).join('')}</section>` : '');
   return syncCard(state.sync) + routines + (list || '<div class="quiet"><img src="/logo.svg" alt=""><b>No sessions in the last two weeks.</b></div>');
+}
+// Folders you opened or closed stay that way (on this device); others open when something happened there lately.
+let folds = {};
+try { folds = JSON.parse(localStorage.getItem('hive.folds') || '{}'); } catch {}
+function isFoldOpen(f) {
+  return folds[f.path] !== undefined ? folds[f.path] : f.running > 0 || Date.now() - f.lastAt < 2 * 86400e3;
+}
+function setFold(p, open) {
+  folds[p] = open;
+  try { localStorage.setItem('hive.folds', JSON.stringify(folds)); } catch {}
 }
 // While a resume is on its way (on any device): no second press, until it shows up as running.
 const startingBtn = `<button class="sumbtn rs-btn" type="button" disabled>${ic('loader')}<span>Starting…</span></button>`;
@@ -791,16 +842,36 @@ async function goSecure() {
   } catch {}
 }
 
-// Re-render on every change, but never while you are selecting text.
+// Re-render on every change, but never while you are selecting text or typing in the page (a new folder's name).
 let pending = false, busy = false;
+const typing = () => { const a = document.activeElement; return !!a && a.tagName === 'INPUT' && app.contains(a); };
+document.addEventListener('focusout', () => setTimeout(() => { if (pending && !typing()) refresh(); }, 0));
 async function refresh() {
-  if (busy || String(getSelection())) { pending = true; return; }
+  if (busy || String(getSelection()) || typing()) { pending = true; return; }
   busy = true; pending = false;
   try { await load(); } catch {}
   busy = false;
   if (pending) setTimeout(refresh, 300);
 }
 document.addEventListener('selectionchange', () => { if (pending && !String(getSelection())) refresh(); });
+
+// A new folder in the workspace; it opens, ready for "New session".
+document.addEventListener('submit', e => {
+  const form = e.target.closest('[data-mkdir]');
+  if (!form) return;
+  e.preventDefault();
+  const input = form.querySelector('input'), name = input.value.trim();
+  if (!name) return;
+  form.querySelector('button').disabled = true;
+  post('/api/mkdir' + q(), { name }).then(r => {
+    form.querySelector('button').disabled = false;
+    if (!r.ok) return toast(r.error);
+    input.value = ''; input.blur();
+    setFold(r.path, true);
+    toast(`Made ${name}`);
+    refresh();
+  });
+});
 
 document.addEventListener('click', e => {
   if (e.target.closest('a') || String(getSelection())) return;
@@ -812,6 +883,17 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-earlier]')) { limit += 6; return refresh(); }
   const pj = e.target.closest('[data-project]');
   if (pj) { const k = pj.dataset.project; openProjects.has(k) ? openProjects.delete(k) : openProjects.add(k); return refresh(); }
+  const fb = e.target.closest('[data-fold]');
+  if (fb) { setFold(fb.dataset.fold, fb.getAttribute('aria-expanded') !== 'true'); return refresh(); }
+  const nb = e.target.closest('[data-new]');
+  if (nb) {
+    nb.disabled = true;
+    const away = lastState.view !== lastState.machine || !lastState.here;
+    return post('/api/new' + q(), { folder: nb.dataset.new }).then(r => {
+      toast(!r.ok ? r.error : away ? `Started in the background on the ${lastState.view}. Open it with Remote Control.` : 'Opened in a new terminal tab');
+      setTimeout(refresh, 1500);
+    });
+  }
   const mb = e.target.closest('[data-machine]');
   if (mb) return pick(mb.dataset.machine);
   const rs = e.target.closest('[data-resume]');

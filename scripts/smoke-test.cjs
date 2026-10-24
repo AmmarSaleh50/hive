@@ -83,7 +83,9 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     JSON.stringify({ type: 'last-prompt', leafUuid: 'a3' }),          // the rewind back to a3
   ].join('\n') + '\n');
   const cfg = path.join(tmp, 'hive.config.json');
-  fs.writeFileSync(cfg, JSON.stringify({ claudeDir, dataDir: path.join(tmp, 'data'), summaries: { enabled: false }, tailscale: false,
+  const ws = path.join(tmp, 'ws'); // a workspace with two folders and no sessions yet
+  for (const d of ['alpha', 'beta']) fs.mkdirSync(path.join(ws, d), { recursive: true });
+  fs.writeFileSync(cfg, JSON.stringify({ claudeDir, dataDir: path.join(tmp, 'data'), summaries: { enabled: false }, tailscale: false, workspace: ws,
     routines: [{ name: 'Check', steps: [{ label: 'Say hi', run: 'node -e "process.exit(0)"' }, { label: 'Node', open: process.execPath, args: ['-e', ''], cwd: tmp, unlessRunning: path.basename(process.execPath) }] },
       { name: 'Broken', steps: [{ label: 'Bad app', open: path.join(tmp, 'no-such-app') }] }] }));
 
@@ -109,6 +111,17 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     check(recent.length === 1 && recent[0].id === 'branchy' && recent[0].running && recent[0].project === 'shop', 'recent sessions come from the transcripts');
     check(JSON.parse((await post('/api/resume', { id: 'branchy' })).body).error === 'That session is already running.', 'a running session is not opened twice');
     check(JSON.parse((await post('/api/resume', { id: 'nope' })).body).ok === false, 'only listed sessions can be resumed');
+
+    // Folders: every folder in the workspace, sessions elsewhere under "other"; new folders by name only.
+    const fl = JSON.parse((await get('/api/folders')).body);
+    check(['alpha', 'beta'].every(n => fl.folders.some(f => f.name === n && f.inWorkspace && f.sessions.length === 0))
+      && fl.folders.some(f => !f.inWorkspace && f.sessions.some(s => s.id === 'branchy')), 'Folders lists every workspace folder, other sessions apart');
+    const made = JSON.parse((await post('/api/mkdir', { name: 'gamma' })).body);
+    check(made.ok && fs.existsSync(path.join(ws, 'gamma')) && JSON.parse((await get('/api/folders')).body).folders.some(f => f.name === 'gamma'), 'a new folder is made in the workspace');
+    const refused = await Promise.all([{ name: '../outside' }, { name: 'gamma' }, { name: 'a/b' }, { name: '..' }].map(async b => JSON.parse((await post('/api/mkdir', b)).body).ok));
+    check(refused.every(ok => !ok) && !fs.existsSync(path.join(tmp, 'outside')), 'folder names with paths, dots or duplicates are refused');
+    const bad = await Promise.all([{}, { folder: '' }, { folder: 'alpha' }, { folder: tmp }, { folder: os.homedir() }].map(async b => JSON.parse((await post('/api/new', b)).body).ok));
+    check(bad.every(ok => !ok), 'new sessions only start in a listed folder');
     check((await post('/api/routine', { name: 'Check' }, { 'x-hive': '' })).status === 403, 'a POST without our header is refused');
     check((await post('/api/routine', { name: 'Check' }, { origin: 'https://evil.example' })).status === 403, 'a POST from another website is refused');
     check((await post('/api/routine', { name: 'Check' }, { 'x-forwarded-for': '100.64.0.9' })).status === 403, 'other devices on the tailnet may not launch');

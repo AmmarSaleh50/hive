@@ -3,6 +3,14 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0 (2026-10-24)
+
+### Added
+
+- **Folders tab** (was Resume): one accordion per folder, its newest three sessions and the rest behind "Show more". Folders remember whether you opened or closed them; the rest open when something happened there in the last two days.
+- **New session** in any folder: in a terminal tab at this screen, in the background from your other devices (`resume.new`, `resume.newBackground`).
+- **`workspace`**: your folder of projects. Every folder in it is listed, with all its sessions however old, and **New folder** makes one there (a plain name only, never a path).
+
 ## 0.4.5 (2026-10-24)
 
 ### Fixed

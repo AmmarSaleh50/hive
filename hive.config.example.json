@@ -20,10 +20,13 @@
     { "name": "laptop", "url": "https://laptop.your-tailnet.ts.net" }
   ],
   "launchFrom": "this-computer",
+  "workspace": "~/code",
   "resume": {
     "days": 14,
     "command": "claude --resume {id}",
     "background": "claude --bg --resume {id}",
+    "new": "claude",
+    "newBackground": "claude --bg",
     "window": "0"
   },
   "routines": [

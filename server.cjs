@@ -23,7 +23,11 @@ const DEFAULTS = {
   // The Resume list: sessions from the last `days`, reopened with `command` in a new terminal tab. `window` (Windows
   // Terminal): "0" = the window you used last, or a name such as "hive" to give resumed sessions a window of their own.
   // `background` is used when you resume from another of your devices (your phone): nobody is at this screen then.
-  resume: { days: 14, command: 'claude --resume {id}', background: 'claude --bg --resume {id}', window: '0' },
+  // `new` and `newBackground` start a new session in a folder, at this screen and from your other devices.
+  resume: { days: 14, command: 'claude --resume {id}', background: 'claude --bg --resume {id}', new: 'claude', newBackground: 'claude --bg', window: '0' },
+  // Your folder of projects, e.g. "~/code": the Folders tab lists every folder in it with all its sessions,
+  // lets you start a session in any of them and make new folders. Empty: only recent sessions, grouped by folder.
+  workspace: '',
   // Buttons that start your day: [{ "name": "Work", "icon": "briefcase", "steps": [...] }]; see hive.config.example.json.
   routines: [],
   machine: '',         // this computer's name in the laptop switch (empty: its host name)
@@ -671,6 +675,15 @@ function sessionInfo(file, st) {
   recentCache.set(file, { key, info });
   return info;
 }
+const WORKSPACE = config.workspace ? path.resolve(home(config.workspace)) : '';
+const samePath = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+// Whether a folder is the workspace or inside it.
+function inWorkspace(p) {
+  if (!WORKSPACE || !p) return false;
+  const rel = path.relative(WORKSPACE, path.resolve(p));
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+// Sessions from the last `days`, and every session inside the workspace however old.
 function recentSessions() {
   const cutoff = Date.now() - config.resume.days * 86400e3, out = [];
   for (const d of safeDir(PROJ)) {
@@ -678,9 +691,9 @@ function recentSessions() {
       if (!f.endsWith('.jsonl')) continue;
       const file = path.join(PROJ, d, f);
       let st; try { st = fs.statSync(file); } catch { continue; }
-      if (st.mtimeMs < cutoff) continue;
+      if (st.mtimeMs < cutoff && !WORKSPACE) continue;
       const info = sessionInfo(file, st);
-      if (!info || !info.cwd) continue;
+      if (!info || !info.cwd || (st.mtimeMs < cutoff && !inWorkspace(info.cwd))) continue;
       const id = f.slice(0, -6), live = sessions.get(id);
       out.push({ id, ...info, name: (live && live.running && live.name) || info.name, project: path.basename(info.cwd),
         lastAt: st.mtimeMs, running: !!(live && live.running), starting: isStarting(id), folderExists: fs.existsSync(info.cwd) });
@@ -769,6 +782,50 @@ async function resumeSession(id, mode = 'here') {
   }
   setTimeout(tick, 500);
   return '';
+}
+
+// The Folders tab: every folder in the workspace (with or without sessions), each folder that has sessions, newest
+// first; then folders outside the workspace.
+function folderList() {
+  const groups = new Map();
+  const group = (p, name) => {
+    const k = process.platform === 'win32' ? p.toLowerCase() : p;
+    if (!groups.has(k)) groups.set(k, { name, path: p, inWorkspace: inWorkspace(p), sessions: [] });
+    return groups.get(k);
+  };
+  if (WORKSPACE) for (const e of (() => { try { return fs.readdirSync(WORKSPACE, { withFileTypes: true }); } catch { return []; } })())
+    if (e.isDirectory() && !e.name.startsWith('.')) group(path.join(WORKSPACE, e.name), e.name);
+  for (const s of recentSessions()) {
+    const p = path.resolve(s.cwd), rel = inWorkspace(p) ? path.relative(WORKSPACE, p) : '';
+    group(p, rel ? rel.split(path.sep).join(' / ') : samePath(p, WORKSPACE) ? path.basename(WORKSPACE) : s.project).sessions.push(s);
+  }
+  const folders = [...groups.values()].map(g => ({ ...g, exists: fs.existsSync(g.path), lastAt: g.sessions.length ? g.sessions[0].lastAt : 0,
+    running: g.sessions.filter(x => x.running).length }));
+  folders.sort((a, b) => (b.inWorkspace - a.inWorkspace) || (b.lastAt - a.lastAt) || a.name.localeCompare(b.name));
+  return { workspace: WORKSPACE ? path.basename(WORKSPACE) : '', folders };
+}
+// A new session in a folder from that list: in a terminal tab at this screen, in the background from elsewhere.
+async function newSession(folder, mode) {
+  // A full path from the list only (an empty one would otherwise mean Hive's own folder).
+  if (typeof folder !== 'string' || !path.isAbsolute(folder)) return 'That folder is not in the list.';
+  const p = path.resolve(folder);
+  if (!folderList().folders.some(f => samePath(f.path, p))) return 'That folder is not in the list.';
+  if (!fs.existsSync(p)) return 'That folder no longer exists.';
+  if (mode === 'here') { openTab({ title: path.basename(p), cwd: p, command: config.resume.new }); return ''; }
+  const r = await sh(config.resume.newBackground, 60e3, p);
+  if (r.ok) setTimeout(tick, 1500);
+  return r.ok ? '' : r.out.split('\n').filter(Boolean).pop() || 'It did not start.';
+}
+// A new folder in the workspace. Names only, no paths: nothing outside the workspace can be made.
+function makeFolder(name) {
+  if (!WORKSPACE) return { error: 'No workspace is set up.' };
+  const n = String(name || '').trim();
+  if (!n || n.length > 80 || /[<>:"/\\|?*\x00-\x1f]/.test(n) || /^\.+$/.test(n) || /[. ]$/.test(n)) return { error: 'Use a plain folder name (no / \\ : * ? " < > |).' };
+  const p = path.join(WORKSPACE, n);
+  if (fs.existsSync(p)) return { error: 'A folder with that name already exists.' };
+  try { fs.mkdirSync(p); } catch (e) { return { error: e.message }; }
+  bump();
+  return { path: p };
 }
 
 // End a session for good: a background one is stopped (its conversation stays), an interactive one's process ends.
@@ -1023,7 +1080,9 @@ async function viaPeer(req, res, u, p, mode) {
     const r = await toPeer(p, u.pathname);
     if (!r.ok) { res.writeHead(r.status); return res.end(); }
     return json(res, await r.json());
-  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync'].includes(u.pathname)) {
+  } else if (u.pathname === '/api/folders') {
+    return json(res, mode ? await (await toPeer(p, '/api/folders')).json() : { workspace: '', folders: [] });
+  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir'].includes(u.pathname)) {
     const body = await readBody(req), r = await toPeer(p, u.pathname, body);
     return json(res, r.ok ? await r.json() : { ok: false, error: `The ${p.name}'s Hive refused that (${r.status}).` });
   } else { res.writeHead(404); return res.end(); }
@@ -1048,7 +1107,7 @@ function handle(req, res) {
     return res.end('{"ok":true}');
   }
   const mode = launchMode(req);
-  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync'].includes(u.pathname);
+  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir'].includes(u.pathname);
   if (LAUNCH) {
     // Only a JSON POST with our own header: browsers can't send that from another website without asking first.
     const origin = req.headers.origin ? new URL(req.headers.origin).host : req.headers.host;
@@ -1065,11 +1124,14 @@ function handle(req, res) {
 
   if (u.pathname === '/api/state') return json(res, localState(mode));
   if (u.pathname === '/api/recent') return json(res, mode ? recentSessions() : []);
+  if (u.pathname === '/api/folders') return json(res, mode ? folderList() : { workspace: '', folders: [] });
   if (LAUNCH) {
     return readBody(req).then(async body => {
       if (u.pathname === '/api/resume') { const err = await resumeSession(String(body.id || ''), mode); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/end') { const err = await endSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/sync') { const err = runSync(); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/new') { const err = await newSession(body.folder, mode); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/mkdir') { const r = makeFolder(body.name); return json(res, { ok: !r.error, error: r.error || '', path: r.path || '' }); }
       const started = runRoutine(String(body.name || ''));
       started.catch(e => console.log('Routine stopped:', e.message));
       // A wrong name or a routine that's still going fails right away; anything later shows on the board.

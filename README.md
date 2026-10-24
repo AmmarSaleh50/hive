@@ -45,11 +45,11 @@ Hive is one page that answers that at a glance.
 
 <p align="center"><img src="docs/screenshots/briefing.png" alt="A briefing: headline, numbers, facts, next step" width="560" /></p>
 
-**Resume with one click.** The **Resume** tab lists your sessions from the last two weeks by project, with your last prompt. Press **Resume** and the session opens as a new tab in the terminal window you already have open, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back. **End session** stops a session for good, also one you started from your phone.
+**Resume with one click, or start fresh.** The **Folders** tab lists your folders with their sessions and your last prompt in each. Start a **New session** in any folder, or make a new folder first. Press **Resume** and the session opens as a new tab in the terminal window you already have open, in the right folder, with your usual flags. Close the terminal by accident and it's one click to get back. **End session** stops a session for good, also one you started from your phone.
 
 **Two computers, one switch.** Run Hive on both and a switch at the top shows one computer's sessions at a time. One that's off says so. Resume and End act on the computer you're looking at. See [Two computers](#two-computers).
 
-**Routines for the start of your day.** One button that starts everything you open before work: Docker and its containers, your dev servers (each in its own terminal tab), the apps you need. Also works from a desktop shortcut. See [Resume and routines](#resume-and-routines).
+**Routines for the start of your day.** One button that starts everything you open before work: Docker and its containers, your dev servers (each in its own terminal tab), the apps you need. Also works from a desktop shortcut. See [Folders, resume and routines](#folders-resume-and-routines).
 
 **On your phone too.** Hive works as a home-screen app, privately over [Tailscale](https://tailscale.com).
 
@@ -106,14 +106,23 @@ tailscale serve --bg --https=443 http://127.0.0.1:4747
 
 Now `https://<this-computer>.<your-tailnet>.ts.net` opens Hive on any device signed in to your Tailscale, and nowhere else. Hive accepts that name by itself. On your phone, use "Add to Home Screen" to get it as an app. To stop sharing: `tailscale serve --https=443 off`.
 
-## Resume and routines
+## Folders, resume and routines
 
-Both start things on your computer, so by default they only show up on the computer Hive runs on. To use them from your phone too, see [Two computers](#two-computers).
+All of these start things on your computer, so by default they only show up on the computer Hive runs on. To use them from your phone too, see [Two computers](#two-computers).
+
+**Folders** lists your sessions by folder, one accordion each: its newest three sessions, the rest behind "Show more". Every folder has **New session**. Point `workspace` at your folder of projects and the tab lists every folder in it, with all of its sessions however old (folders you haven't used yet too), and lets you make new folders there:
+
+```json
+"workspace": "~/code"
+```
 
 **Resume** opens each session with `claude --resume <id>` in a new tab of the terminal window you used last, so every session you resume lands next to your others. Sessions that are still running say so instead. To add your own flags:
 
 ```json
-"resume": { "command": "claude --resume {id} --dangerously-skip-permissions" }
+"resume": {
+  "command": "claude --resume {id} --dangerously-skip-permissions",
+  "new": "claude --dangerously-skip-permissions"
+}
 ```
 
 On Windows it uses Windows Terminal with PowerShell 7 (or Windows PowerShell when 7 isn't installed), on macOS Terminal, on Linux GNOME Terminal. To give resumed sessions a window of their own instead, set `"window": "hive"`.
@@ -205,8 +214,11 @@ Copy `hive.config.example.json` to `hive.config.json` and change what you need. 
 | `resume.days` | `14` | How far back the Resume list goes |
 | `resume.command` | `claude --resume {id}` | Command a resumed session runs |
 | `resume.background` | `claude --bg --resume {id}` | Command for resuming from another of your devices |
+| `resume.new` | `claude` | Command for a new session in a folder |
+| `resume.newBackground` | `claude --bg` | Command for a new session started from another of your devices |
+| `workspace` | none | Your folder of projects: every folder in it shows in Folders, with all its sessions, and new folders can be made there |
 | `resume.window` | `0` | Windows Terminal window for new tabs: `0` is the one you used last, a name like `hive` gives them their own |
-| `routines` | `[]` | Your routine buttons, see [Resume and routines](#resume-and-routines) |
+| `routines` | `[]` | Your routine buttons, see [Folders, resume and routines](#folders-resume-and-routines) |
 | `machine` | host name | This computer's name in the switch |
 | `peers` | `[]` | Other computers' Hives: `[{ "name": "2060", "url": "https://...ts.net" }]` |
 | `launchFrom` | `this-computer` | `my-devices` lets your own Tailscale devices resume, end and run things |
