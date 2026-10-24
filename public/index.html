@@ -134,7 +134,8 @@ nav button.on { border-color: var(--fg); }
 .rs-btn .li { width: 14px; height: 14px; }
 .rs-btn:disabled { cursor: default; border-color: var(--fg); }
 .rs-on { min-width: 104px; text-align: center; font-size: 13px; font-weight: 600; color: var(--honey); }
-.vbtns { display: flex; gap: 8px; flex: none; }
+.vbtns { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.rs-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 /* Folders: one accordion each */
 .fold { border: 1px solid var(--edge); border-radius: 14px; background: var(--row); }
 .fold-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; }
@@ -676,7 +677,7 @@ function renderSession(d) {
   return `<div class="view ${cls}">
     <button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button>
     <div class="vtitle"><h1 class="vname">${tag(s.id)}<span>${esc(s.name)}</span></h1><div class="vbtns">${!lastState.canLaunch ? ''
-      : s.state === 'closed' ? (s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`) : endBtn(s)}${sumBtn(s)}</div></div>
+      : s.state === 'closed' ? (s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`) : attachBtn(s) + endBtn(s)}${sumBtn(s)}</div></div>
     <div class="status ${cls}">${status}${s.project ? ` in ${esc(s.project)}` : ''}</div>
     ${p ? `<div class="goal">${hex(p.icon)}<span>${esc(p.goal)}</span></div>
       <div class="score"><div class="pct">${p.pct}%</div>${comb(p)}</div>
@@ -764,7 +765,7 @@ function renderResume(state, data) {
   const row = s => `<div class="rs-row">
       <div class="rs-main"><div class="name">${tag(s.id)}<span>${esc(s.name)}</span></div><div class="rs-last">${esc(s.last)}</div></div>
       <span class="rs-when">${ago(s.lastAt)}</span>
-      ${s.running ? endBtn(state.sessions.find(x => x.id === s.id) || { id: s.id }) : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
+      ${s.running ? `<span class="rs-acts">${attachBtn(state.sessions.find(x => x.id === s.id) || {})}${endBtn(state.sessions.find(x => x.id === s.id) || { id: s.id })}</span>` : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
         : s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
     </div>`;
   // One accordion per folder: its newest 3 sessions, the rest behind "Show more".
@@ -802,6 +803,8 @@ function setFold(p, open) {
 const startingBtn = `<button class="sumbtn rs-btn" type="button" disabled>${ic('loader')}<span>Starting…</span></button>`;
 // Ending is for good, so it takes a second press (see the click handler).
 let armed = ''; // the session whose End button waits for its second press
+// A session running in the background has no window: this opens it in a terminal tab on its computer.
+const attachBtn = s => s.background ? `<button class="sumbtn rs-btn" type="button" data-attach="${esc(s.id)}">${ic('terminal')}<span>Open in terminal</span></button>` : '';
 const endBtn = s => `<button class="sumbtn rs-btn end-btn${armed === s.id ? ' arm' : ''}" type="button" data-end="${esc(s.id)}">${ic('square')}<span>${
   armed !== s.id ? 'End session' : s.state === 'working' ? "It's working. End anyway?" : 'End it for good?'}</span></button>`;
 // The transfer's status file: running, startedAt, finishedAt, result (ok, partial, error), counts, errors, error.
@@ -888,9 +891,8 @@ document.addEventListener('click', e => {
   const nb = e.target.closest('[data-new]');
   if (nb) {
     nb.disabled = true;
-    const away = lastState.view !== lastState.machine || !lastState.here;
     return post('/api/new' + q(), { folder: nb.dataset.new }).then(r => {
-      toast(!r.ok ? r.error : away ? `Started in the background on the ${lastState.view}. Open it with Remote Control.` : 'Opened in a new terminal tab');
+      toast(!r.ok ? r.error : `Opened in a terminal tab on the ${lastState.view}`);
       setTimeout(refresh, 1500);
     });
   }
@@ -900,11 +902,15 @@ document.addEventListener('click', e => {
   if (rs) {
     rs.disabled = true; rs.innerHTML = startingBtn.replace(/^<button[^>]*>|<\/button>$/g, '');
     // At this screen it opens in a terminal tab; anywhere else it starts in the background, for Remote Control.
-    const away = lastState.view !== lastState.machine || !lastState.here;
     return post('/api/resume' + q(), { id: rs.dataset.resume }).then(r => {
-      toast(!r.ok ? r.error : away ? `Started in the background on the ${lastState.view}. Open it with Remote Control.` : 'Opened in a new terminal tab');
+      toast(!r.ok ? r.error : `Opened in a terminal tab on the ${lastState.view}`);
       setTimeout(refresh, 1500);
     });
+  }
+  const ab = e.target.closest('[data-attach]');
+  if (ab) {
+    ab.disabled = true;
+    return post('/api/attach' + q(), { id: ab.dataset.attach }).then(r => { toast(r.ok ? `Opened in a terminal tab on the ${lastState.view}` : r.error); setTimeout(refresh, 800); });
   }
   const eb = e.target.closest('[data-end]');
   if (eb) {

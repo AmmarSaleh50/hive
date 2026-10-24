@@ -3,6 +3,20 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.1 (2026-10-24)
+
+### Changed
+
+- **Resuming or starting a session from your phone opens it in a terminal tab on that computer**, like at its own screen, instead of hidden in the background. Remote Control still reaches it. `"resume": { "elsewhere": "background" }` brings back the old way.
+
+### Added
+
+- **Open in terminal** for sessions running in the background: opens them in a terminal tab on their computer (`claude attach`).
+
+### Fixed
+
+- **Sessions keep the name you gave them.** A background session reports a name Claude made up (its AI title); Hive now prefers the name you set with /rename.
+
 ## 0.5.0 (2026-10-24)
 
 ### Added

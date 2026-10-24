@@ -22,9 +22,10 @@ const DEFAULTS = {
   dataDir: './data',   // where Hive keeps its progress cache and Haiku usage log
   // The Resume list: sessions from the last `days`, reopened with `command` in a new terminal tab. `window` (Windows
   // Terminal): "0" = the window you used last, or a name such as "hive" to give resumed sessions a window of their own.
-  // `background` is used when you resume from another of your devices (your phone): nobody is at this screen then.
+  // From your other devices a session opens in a terminal tab here too (Remote Control reaches it there); set
+  // `elsewhere` to "background" to start those as background sessions instead, with `background` / `newBackground`.
   // `new` and `newBackground` start a new session in a folder, at this screen and from your other devices.
-  resume: { days: 14, command: 'claude --resume {id}', background: 'claude --bg --resume {id}', new: 'claude', newBackground: 'claude --bg', window: '0' },
+  resume: { days: 14, command: 'claude --resume {id}', background: 'claude --bg --resume {id}', new: 'claude', newBackground: 'claude --bg', elsewhere: 'tab', window: '0' },
   // Your folder of projects, e.g. "~/code": the Folders tab lists every folder in it with all its sessions,
   // lets you start a session in any of them and make new folders. Empty: only recent sessions, grouped by folder.
   workspace: '',
@@ -136,7 +137,7 @@ function scanRegistry() {
     seen.add(r.sessionId);
     const s = session(r.sessionId);
     // A background session also registers itself there, as kind "bg" with its short id as jobId.
-    const next = { name: r.name || '', cwd: r.cwd || '', pid: r.pid, kind: r.kind === 'bg' ? 'background' : r.kind || '', short: r.short || r.jobId || '', status: r.status || '',
+    const next = { name: r.name || '', cwd: r.cwd || '', pid: r.pid, kind: r.kind === 'bg' ? 'background' : r.kind || '', short: r.short || r.jobId || '', nameSource: r.nameSource || '', status: r.status || '',
       startedAt: r.startedAt || 0, stateSince: r.statusUpdatedAt || 0, running: true, endedAt: 0 };
     if (s.status !== next.status) { s.dirty = true; s.stateChanged = true; }
     for (const k in next) if (s[k] !== next[k]) { s[k] = next[k]; changed = true; }
@@ -314,9 +315,12 @@ function readTasks(s) {
   return true;
 }
 
+// The name you gave a session (/rename, kept in its transcript) beats one Claude made up for it, which is what a
+// background session reports as its name.
 function displayName(s) {
-  if (s.name) return s.name;
+  if (s.name && s.nameSource === 'user') return s.name;
   if (s.title) return s.title;
+  if (s.name) return s.name;
   const first = active(s).find(m => m.role === 'you');
   if (first) return first.text.replace(/\s+/g, ' ').slice(0, 48);
   return s.id.slice(0, 8);
@@ -671,7 +675,7 @@ function sessionInfo(file, st) {
     if (o.type === 'custom-title' && o.customTitle) title = o.customTitle;
     if (o.type === 'last-prompt' && o.lastPrompt) last = String(o.lastPrompt).replace(/\s+/g, ' ');
   }
-  const info = first ? { cwd, name: title || first.slice(0, 60), last: (last || first).slice(0, 160) } : null; // no prompt = headless run
+  const info = first ? { cwd, name: title || first.slice(0, 60), named: !!title, last: (last || first).slice(0, 160) } : null; // no prompt = headless run
   recentCache.set(file, { key, info });
   return info;
 }
@@ -695,7 +699,7 @@ function recentSessions() {
       const info = sessionInfo(file, st);
       if (!info || !info.cwd || (st.mtimeMs < cutoff && !inWorkspace(info.cwd))) continue;
       const id = f.slice(0, -6), live = sessions.get(id);
-      out.push({ id, ...info, name: (live && live.running && live.name) || info.name, project: path.basename(info.cwd),
+      out.push({ id, ...info, name: info.named ? info.name : (live && live.running && displayName(live)) || info.name, project: path.basename(info.cwd),
         lastAt: st.mtimeMs, running: !!(live && live.running), starting: isStarting(id), folderExists: fs.existsSync(info.cwd) });
     }
   }
@@ -764,7 +768,7 @@ async function resumeSession(id, mode = 'here') {
   if (isStarting(id)) return 'It is already starting.';
   if (!s.folderExists) return `Its folder no longer exists: ${s.cwd}`;
   starting.set(id, Date.now()); bump();
-  if (mode === 'here') { openTab({ title: s.name.slice(0, 40), cwd: s.cwd, command: fill(config.resume.command, { id }) }); return ''; }
+  if (mode === 'here' || config.resume.elsewhere !== 'background') { openTab({ title: s.name.slice(0, 40), cwd: s.cwd, command: fill(config.resume.command, { id }) }); return ''; }
   // One that ran in the background before keeps its own options in its job record; any option added here would make
   // Claude start a copy instead, so it's woken just as it was (the command up to the id).
   let job = null;
@@ -811,7 +815,7 @@ async function newSession(folder, mode) {
   const p = path.resolve(folder);
   if (!folderList().folders.some(f => samePath(f.path, p))) return 'That folder is not in the list.';
   if (!fs.existsSync(p)) return 'That folder no longer exists.';
-  if (mode === 'here') { openTab({ title: path.basename(p), cwd: p, command: config.resume.new }); return ''; }
+  if (mode === 'here' || config.resume.elsewhere !== 'background') { openTab({ title: path.basename(p), cwd: p, command: config.resume.new }); return ''; }
   const r = await sh(config.resume.newBackground, 60e3, p);
   if (r.ok) setTimeout(tick, 1500);
   return r.ok ? '' : r.out.split('\n').filter(Boolean).pop() || 'It did not start.';
@@ -826,6 +830,14 @@ function makeFolder(name) {
   try { fs.mkdirSync(p); } catch (e) { return { error: e.message }; }
   bump();
   return { path: p };
+}
+
+// A background session, opened in a terminal tab on its computer (it keeps running when the tab closes).
+function attachSession(id) {
+  const s = sessions.get(id);
+  if (!s || !s.running || s.kind !== 'background' || !/^[0-9a-f]{8}$/.test(s.short)) return 'That is not a running background session.';
+  openTab({ title: displayName(s).slice(0, 40), cwd: s.cwd || os.homedir(), command: `claude attach ${s.short}` });
+  return '';
 }
 
 // End a session for good: a background one is stopped (its conversation stays), an interactive one's process ends.
@@ -1082,7 +1094,7 @@ async function viaPeer(req, res, u, p, mode) {
     return json(res, await r.json());
   } else if (u.pathname === '/api/folders') {
     return json(res, mode ? await (await toPeer(p, '/api/folders')).json() : { workspace: '', folders: [] });
-  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir'].includes(u.pathname)) {
+  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach'].includes(u.pathname)) {
     const body = await readBody(req), r = await toPeer(p, u.pathname, body);
     return json(res, r.ok ? await r.json() : { ok: false, error: `The ${p.name}'s Hive refused that (${r.status}).` });
   } else { res.writeHead(404); return res.end(); }
@@ -1107,7 +1119,7 @@ function handle(req, res) {
     return res.end('{"ok":true}');
   }
   const mode = launchMode(req);
-  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir'].includes(u.pathname);
+  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach'].includes(u.pathname);
   if (LAUNCH) {
     // Only a JSON POST with our own header: browsers can't send that from another website without asking first.
     const origin = req.headers.origin ? new URL(req.headers.origin).host : req.headers.host;
@@ -1128,6 +1140,7 @@ function handle(req, res) {
   if (LAUNCH) {
     return readBody(req).then(async body => {
       if (u.pathname === '/api/resume') { const err = await resumeSession(String(body.id || ''), mode); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/attach') { const err = attachSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/end') { const err = await endSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/sync') { const err = runSync(); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/new') { const err = await newSession(body.folder, mode); return json(res, { ok: !err, error: err }); }
