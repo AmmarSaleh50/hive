@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.1 (2026-10-24)
+
+### Added
+
+- **Send to background** for a session running in a terminal: its terminal process ends and it continues as a background session under the same id (Claude would only start a copy while it's still open). If it's in the middle of something, it asks once more, since that stops. Reach it again with Remote Control or **Open in terminal**.
+
 ## 0.6.0 (2026-10-24)
 
 ### Added

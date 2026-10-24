@@ -931,6 +931,26 @@ function makeFolder(name) {
   return { path: p };
 }
 
+// A session in a terminal, moved to the background: its process ends, then it continues there under the same id
+// (while it's still open anywhere, Claude would only start a copy). Whatever it was doing that second stops; it then
+// waits for your next message, which Remote Control or "Open in terminal" can send.
+async function toBackground(id) {
+  const s = sessions.get(id);
+  if (!s || !s.running || s.kind === 'background') return 'That is not a session running in a terminal.';
+  const pid = s.pid, cwd = s.cwd || os.homedir(), err = await endSession(id);
+  if (err) return err;
+  for (let i = 0; i < 40 && alive(pid); i++) await new Promise(r => setTimeout(r, 250));
+  let job = null;                                      // ran in the background before: it keeps its own options there
+  try { job = JSON.parse(fs.readFileSync(path.join(CLAUDE, 'jobs', id.slice(0, 8), 'state.json'), 'utf8')); } catch {}
+  const cmd = job && job.sessionId === id ? config.resume.background.replace(/\{id\}.*$/, '{id}') : config.resume.background;
+  const r = await sh(fill(cmd, { id }), 60e3, cwd);
+  setTimeout(tick, 1500);
+  if (!r.ok) return r.out.split('\n').filter(Boolean).pop() || 'It did not start in the background.';
+  const copy = /\bcopy\b/i.test(r.out) && (r.out.match(/claude attach ([0-9a-f]{8})/) || [])[1];
+  if (copy) { await sh(`"${CLAUDE_BIN}" stop ${copy}`, 30e3); await sh(`"${CLAUDE_BIN}" rm ${copy}`, 30e3); return 'Claude would only start a copy, so nothing was started; resume it from Folders.'; }
+  return '';
+}
+
 // A background session, opened in a terminal tab on its computer (it keeps running when the tab closes).
 function attachSession(id) {
   const s = sessions.get(id);
@@ -1195,7 +1215,7 @@ async function viaPeer(req, res, u, p, mode) {
     return json(res, mode ? await (await toPeer(p, '/api/search?q=' + encodeURIComponent(u.searchParams.get('q') || ''))).json() : { ready: true, results: [] });
   } else if (u.pathname === '/api/folders') {
     return json(res, mode ? await (await toPeer(p, '/api/folders')).json() : { workspace: '', folders: [] });
-  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach'].includes(u.pathname)) {
+  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach', '/api/background'].includes(u.pathname)) {
     const body = await readBody(req), r = await toPeer(p, u.pathname, body);
     return json(res, r.ok ? await r.json() : { ok: false, error: `The ${p.name}'s Hive refused that (${r.status}).` });
   } else { res.writeHead(404); return res.end(); }
@@ -1220,7 +1240,7 @@ function handle(req, res) {
     return res.end('{"ok":true}');
   }
   const mode = launchMode(req);
-  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach'].includes(u.pathname);
+  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach', '/api/background'].includes(u.pathname);
   if (LAUNCH) {
     // Only a JSON POST with our own header: browsers can't send that from another website without asking first.
     const origin = req.headers.origin ? new URL(req.headers.origin).host : req.headers.host;
@@ -1247,6 +1267,7 @@ function handle(req, res) {
   if (LAUNCH) {
     return readBody(req).then(async body => {
       if (u.pathname === '/api/resume') { const err = await resumeSession(String(body.id || ''), mode); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/background') { const err = await toBackground(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/attach') { const err = attachSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/end') { const err = await endSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/sync') { const err = runSync(); return json(res, { ok: !err, error: err }); }
