@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.2 (2026-10-25)
+
+### Fixed
+
+- **Tabs switch the moment you press them.** Folders used to wait for the board data and then the folder list, one after the other (seconds over a slow link), before even marking the tab. Now the tab shows at once from what is loaded, the folder list is fetched ahead in the background and together with the board data, and a slower earlier load can no longer flip you back.
+
 ## 0.7.1 (2026-10-25)
 
 ### Fixed

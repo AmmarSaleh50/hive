@@ -766,12 +766,15 @@ function renderSwitch(state) {
   box.innerHTML = ms.map(x => `<button type="button" role="tab" aria-selected="${x.name === state.view}" data-machine="${esc(x.name)}"${x.name === state.view ? ' class="on"' : ''}>${esc(x.name)}${x.online ? '' : `<em>${x.unreachable ? 'no link' : 'off'}</em>`}</button>`).join('');
 }
 
+let loadSeq = 0;   // a newer load (after a tab press) wins over one still on its way
 async function load() {
-  const r = location.hash.slice(1);
+  const r = location.hash.slice(1), seq = ++loadSeq;
   if (r !== route) { route = r; limit = 6; window.scrollTo(0, 0); }
+  const foldersP = r === 'resume' ? fetch('/api/folders' + q()).then(x => x.json()).catch(() => null) : null; // at the same time, not after
   const got = await fetch('/api/state' + q());
   if (got.status === 404 && machineShown) { pick(''); return; } // a computer this Hive doesn't know (any more)
   const state = await got.json();
+  if (seq !== loadSeq) return;
   lastState = state;
   renderSwitch(state);
   document.getElementById('demo-tag').hidden = !state.demo;
@@ -791,11 +794,19 @@ async function load() {
       : `<div class="quiet"><img src="/logo.svg" alt=""><b>The ${esc(state.view)} is off.</b><span>Its sessions show up here as soon as it's on again.</span></div>`;
   } else if (r.startsWith('s/')) {
     const res = await fetch('/api/session/' + encodeURIComponent(r.slice(2)) + q());
+    if (seq !== loadSeq) return;
     app.innerHTML = res.ok ? renderSession(await res.json()) : '<div class="view"><button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button><div class="nowline">That session has left the hive.</div></div>';
   } else if (r === 'resume' && state.canLaunch) {
-    app.innerHTML = renderResume(state, await (await fetch('/api/folders' + q())).json());
+    const fd = (await foldersP) || folderData;
+    if (seq !== loadSeq) return;
+    if (fd) { folderView = q(); app.innerHTML = renderResume(state, fd); }
   } else {
     app.innerHTML = renderBoard(state);
+    // the Folders tab, loaded ahead in the background, so pressing it shows them at once
+    if (state.canLaunch && !state.offline && folderView !== q()) {
+      const want = q();
+      fetch('/api/folders' + want).then(x => x.json()).then(d => { if (q() === want) { folderData = d; folderView = want; } }).catch(() => {});
+    }
   }
   drawIcons();
 }
@@ -1160,7 +1171,21 @@ document.addEventListener('click', e => {
   if (t) location.hash = 's/' + t.dataset.id;
 });
 app.addEventListener('keydown', e => { const t = e.target.closest('.row'); if (t && e.key === 'Enter') location.hash = 's/' + t.dataset.id; });
-addEventListener('hashchange', refresh);
+// A tab switches the moment you press it, from what is already loaded; the fresh data follows.
+let folderView = null; // which computer folderData is from
+function showRouteNow() {
+  const r = location.hash.slice(1);
+  document.getElementById('tab-board').classList.toggle('on', r !== 'resume');
+  document.getElementById('tab-resume').classList.toggle('on', r === 'resume');
+  if (!lastState || lastState.offline) return;
+  try {
+    if (r === 'resume' && folderData && folderView === q()) { app.innerHTML = renderResume(lastState, folderData); drawIcons(); }
+    else if (r === '') { app.innerHTML = renderBoard(lastState); drawIcons(); }
+    else return;
+    if (r !== route) { route = r; limit = 6; window.scrollTo(0, 0); }
+  } catch {}
+}
+addEventListener('hashchange', () => { showRouteNow(); busy = false; refresh(); });
 
 // ---- Stimulation window ----
 // Long gameplay videos (embeddable, checked 2026-10-22); each play starts at a random point.
