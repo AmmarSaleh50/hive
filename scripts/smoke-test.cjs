@@ -82,6 +82,16 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     entry('a4', 'u4', 'assistant', 'Pink buttons done.'),
     JSON.stringify({ type: 'last-prompt', leafUuid: 'a3' }),          // the rewind back to a3
   ].join('\n') + '\n');
+  // Sent to the background (/bg): the conversation moved on to "branchy", and the old file says so. A second one was
+  // talked to again afterwards, so it is a conversation of its own.
+  fs.writeFileSync(path.join(proj, 'moved-away.jsonl'), [entry('m1', null, 'user', 'Start the shop'), entry('m2', 'm1', 'assistant', 'Started.'),
+    JSON.stringify({ type: 'continued-in', sessionId: 'moved-away', continuedInSessionId: 'branchy' })].join('\n') + '\n');
+  fs.writeFileSync(path.join(proj, 'went-on.jsonl'), [entry('w1', null, 'user', 'Plan the shop'), entry('w2', 'w1', 'assistant', 'Planned.'),
+    JSON.stringify({ type: 'continued-in', sessionId: 'went-on', continuedInSessionId: 'branchy' }), entry('w3', 'w2', 'user', 'one more thing')].join('\n') + '\n');
+  // Moved by /bg: the new session's file starts with file snapshots (here 330 KB) before its first message.
+  const snap = JSON.stringify({ type: 'file-history-snapshot', snapshot: { trackedFileBackups: { pad: 'x'.repeat(11000) } } });
+  fs.writeFileSync(path.join(proj, 'late-start.jsonl'), [JSON.stringify({ type: 'custom-title', customTitle: 'late start' }), ...Array(30).fill(snap),
+    entry('l1', null, 'user', 'Where were we'), entry('l2', 'l1', 'assistant', 'At the shop.')].join('\n') + '\n');
   const cfg = path.join(tmp, 'hive.config.json');
   const ws = path.join(tmp, 'ws'); // a workspace with two folders and no sessions yet
   for (const d of ['alpha', 'beta']) fs.mkdirSync(path.join(ws, d), { recursive: true });
@@ -108,8 +118,13 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     // Resume and routines: only from this computer, only as a JSON POST with Hive's own header.
     check(st.canLaunch === true && st.routines[0].name === 'Check', 'this computer may launch, and sees its routines');
     const recent = JSON.parse((await get('/api/recent')).body);
-    check(recent.length === 1 && recent[0].id === 'branchy' && recent[0].running && recent[0].project === 'shop', 'recent sessions come from the transcripts');
+    const rb = recent.find(s => s.id === 'branchy');
+    check(rb && rb.running && rb.project === 'shop', 'recent sessions come from the transcripts');
+    check(!recent.some(s => s.id === 'moved-away') && recent.some(s => s.id === 'went-on'),
+      'a session whose conversation moved on (/bg) is left out, unless it was talked to again afterwards');
+    check(recent.some(s => s.id === 'late-start' && s.name === 'late start'), 'a session whose first message comes after hundreds of KB of file snapshots is listed');
     check(JSON.parse((await post('/api/resume', { id: 'branchy' })).body).error === 'That session is already running.', 'a running session is not opened twice');
+    check(JSON.parse((await post('/api/resume', { id: 'moved-away' })).body).error === 'That session is already running.', 'resuming a moved session goes to where it lives now');
     check(JSON.parse((await post('/api/resume', { id: 'nope' })).body).ok === false, 'only listed sessions can be resumed');
 
     // Folders: every folder in the workspace, sessions elsewhere under "other"; new folders by name only.

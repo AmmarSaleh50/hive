@@ -3,6 +3,13 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.5 (2026-10-25)
+
+### Fixed
+
+- **Resume opens a session where its conversation is now.** Send to background (Claude Code's /bg) moves the conversation to a new session; Hive kept offering the old one, which stops where it was sent away. The old one is now left out of the lists (unless it was talked to again), and resuming it opens the new one.
+- **Sessions moved by /bg are listed at all.** Their file starts with a few hundred KB of file snapshots, and Hive only looked for the first message in the first 256 KB, so it took them for headless runs. It now reads further until it finds it.
+
 ## 0.6.4 (2026-10-24)
 
 ### Fixed

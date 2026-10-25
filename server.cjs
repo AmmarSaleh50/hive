@@ -646,6 +646,7 @@ function sendVideo(req, res, file) {
 // ---- Resume and routines: open sessions in terminal tabs, start your day's apps -------------------
 // Recent sessions come straight from the transcripts: their folder, name and your last prompt.
 const recentCache = new Map(); // file -> { key, info }
+const headCache = new Map();   // file -> { cwd, first, headTitle }
 function readSlice(file, start, len) {
   const b = Buffer.alloc(len);
   const fd = fs.openSync(file, 'r');
@@ -661,21 +662,36 @@ function promptText(o) {
 function sessionInfo(file, st) {
   const key = st.size + ':' + st.mtimeMs, hit = recentCache.get(file);
   if (hit && hit.key === key) return hit.info;
-  let cwd = '', first = '', title = '', last = '';
-  for (const l of readSlice(file, 0, Math.min(st.size, 256 * 1024))) {
+  // Where it ran and its first prompt never change once found. A session moved by /bg starts with a few hundred KB of
+  // file snapshots before its first message, so the start is read in growing pieces until both are there.
+  let { cwd = '', first = '', headTitle = '' } = headCache.get(file) || {}, title = '', last = '';
+  for (const upto of [256 << 10, 4 << 20, 16 << 20]) {
     if (cwd && first) break;
-    let o; try { o = JSON.parse(l); } catch { continue; }
-    if (!cwd && o.cwd) cwd = o.cwd;
-    if (!first && o.type === 'user' && !o.isSidechain && !o.isMeta) first = promptText(o);
+    for (const l of readSlice(file, 0, Math.min(st.size, upto))) {
+      if (cwd && first) break;
+      if (l.length > 2e6) continue;
+      let o; try { o = JSON.parse(l); } catch { continue; }
+      if (!cwd && o.cwd) cwd = o.cwd;
+      if (!first && o.type === 'user' && !o.isSidechain && !o.isMeta) first = promptText(o);
+      if (!headTitle && o.type === 'custom-title' && o.customTitle) headTitle = o.customTitle;   // in case the end has none
+    }
+    if (upto >= st.size) break;
   }
+  if (cwd && first) headCache.set(file, { cwd, first, headTitle });
+  // Sending a session to the background (/bg) moves its conversation to a new session and leaves a "continued-in"
+  // note in the old one. Unless the old one was talked to again after that, the new one is where it lives now.
+  let continuedIn = '';
   const from = Math.max(0, st.size - 256 * 1024);
   for (const l of readSlice(file, from, st.size - from)) {
-    if (!l.includes('"custom-title"') && !l.includes('"last-prompt"')) continue;
+    if (continuedIn && (l.includes('"type":"user"') || l.includes('"type":"assistant"'))) { continuedIn = ''; continue; }
+    if (!l.includes('"custom-title"') && !l.includes('"last-prompt"') && !l.includes('"continued-in"')) continue;
     let o; try { o = JSON.parse(l); } catch { continue; }
     if (o.type === 'custom-title' && o.customTitle) title = o.customTitle;
     if (o.type === 'last-prompt' && o.lastPrompt) last = String(o.lastPrompt).replace(/\s+/g, ' ');
+    if (o.type === 'continued-in' && /^[\w-]+$/.test(o.continuedInSessionId || '')) continuedIn = o.continuedInSessionId;
   }
-  const info = first ? { cwd, name: title || first.slice(0, 60), named: !!title, last: (last || first).slice(0, 160) } : null; // no prompt = headless run
+  title = title || headTitle;
+  const info = first ? { cwd, name: title || first.slice(0, 60), named: !!title, last: (last || first).slice(0, 160), continuedIn } : null; // no prompt = headless run
   recentCache.set(file, { key, info });
   return info;
 }
@@ -687,8 +703,20 @@ function inWorkspace(p) {
   const rel = path.relative(WORKSPACE, path.resolve(p));
   return !rel.startsWith('..') && !path.isAbsolute(rel);
 }
-// Sessions from the last `days`, and every session inside the workspace however old.
+// Sessions from the last `days`, and every session inside the workspace however old. One whose conversation moved on
+// to a newer session (see sessionInfo) is left out unless it is running, so only the newest can be resumed.
 function recentSessions() {
+  const all = allSessions(), ids = new Set(all.map(s => s.id));
+  return all.filter(s => s.running || !(s.continuedIn && ids.has(s.continuedIn)));
+}
+// Where a session's conversation is now: the end of its chain of /bg moves (itself if it never moved).
+function latestOf(id) {
+  const all = new Map(allSessions().map(s => [s.id, s])), seen = new Set();
+  let s = all.get(id);
+  while (s && s.continuedIn && all.has(s.continuedIn) && !seen.has(s.id)) { seen.add(s.id); s = all.get(s.continuedIn); }
+  return s || null;
+}
+function allSessions() {
   const cutoff = Date.now() - config.resume.days * 86400e3, out = [];
   for (const d of safeDir(PROJ)) {
     for (const f of safeDir(path.join(PROJ, d))) {
@@ -762,8 +790,9 @@ function rosterSession(short) {
 // Control reaches it. (`--bg --resume` needs the full session id, or it starts a copy under a new one. It also starts
 // a copy, under a new id, when the session is still open somewhere: such a copy is ended at once and you're told why.)
 async function resumeSession(id, mode = 'here') {
-  const s = /^[\w-]+$/.test(id) && recentSessions().find(x => x.id === id);
+  const s = /^[\w-]+$/.test(id) && latestOf(id);       // an older id (a bookmark, a search hit) opens where it moved to
   if (!s) return 'That session is not in the Resume list.';
+  id = s.id;
   if (s.running) return 'That session is already running.';
   if (isStarting(id)) return 'It is already starting.';
   if (!s.folderExists) return `Its folder no longer exists: ${s.cwd}`;
