@@ -3,6 +3,12 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.1 (2026-10-25)
+
+### Fixed
+
+- **A long plan no longer crushes its row.** On the board, a session with dozens of steps drew one hexagon per step in a single line, squeezing the goal into a narrow column; the hexagons now wrap into a small block (smaller on a phone).
+
 ## 0.7.0 (2026-10-25)
 
 ### Added
