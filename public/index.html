@@ -181,6 +181,15 @@ mark { background: var(--honey); color: var(--bg); border-radius: 3px; padding: 
 .mk input::placeholder { color: var(--fg); opacity: 1; }
 .mk input:focus { outline: none; border-color: var(--fg); }
 .end-btn.arm { border-color: var(--red); color: var(--red); }
+.menu-wrap { position: relative; display: inline-flex; }
+.menu-btn { display: inline-grid; place-items: center; width: 44px; min-width: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }
+.menu-btn .li { width: 16px; height: 16px; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 230px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--row); border: 1px solid var(--edge); border-radius: 12px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+.menu button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 14px; font-weight: 500; white-space: nowrap; }
+.menu button:hover { background: var(--wax); }
+.menu button .li { width: 15px; height: 15px; }
+.menu .end-btn.arm { color: var(--red); }
 .rt-status .bad { color: var(--red); }
 .sync-notes { font-size: 14px; line-height: 1.5; border: 1px solid var(--honey); border-radius: 12px; padding: 10px 14px; }
 .sync-notes b { color: var(--honey); }
@@ -718,8 +727,8 @@ function renderSession(d) {
   return `<div class="view ${cls}">
     <button class="back" type="button" data-go=""><span aria-hidden="true">←</span>All sessions</button>
     <div class="vtitle"><h1 class="vname">${tag(s.id)}<span>${esc(s.name)}</span></h1><div class="vbtns">${!lastState.canLaunch ? ''
-      : s.state === 'closed' ? (s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`) : attachBtn(s) + bgBtn(s) + endBtn(s)}${sumBtn(s)}</div></div>
-    <div class="status ${cls}">${status}${s.project ? ` in ${esc(s.project)}` : ''}</div>
+      : s.state === 'closed' ? (s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`) : menuBtn(s)}${sumBtn(s)}</div></div>
+    <div class="status ${cls}">${status}${s.project ? ` in ${esc(s.project)}` : ''}${s.paused ? ', summaries paused' : ''}</div>
     ${p ? `<div class="goal">${hex(p.icon)}<span>${esc(p.goal)}</span></div>
       <div class="score"><div class="pct">${p.pct}%</div>${comb(p)}</div>
       <div class="nowline">${esc(nowText(s))}</div>
@@ -822,7 +831,7 @@ function sessionRow(state, s, hit, terms) {
       <div class="rs-main"><div class="name">${tag(s.id)}<span>${mark(s.name, terms)}</span></div><div class="rs-last">${mark(s.last, terms)}</div>
         ${hit ? `<div class="rs-hit"><b>${hit.role === 'you' ? 'You' : 'Claude'}, ${ago(hit.at)}:</b> ${mark(hit.snippet, terms)}</div>` : ''}</div>
       <span class="rs-when">${ago(s.lastAt)}</span>
-      ${s.running ? `<span class="rs-acts">${attachBtn(live)}${bgBtn(live)}${endBtn(live)}</span>` : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
+      ${s.running ? `<span class="rs-acts">${menuBtn(live)}</span>` : !s.folderExists ? '<span class="rs-on">Folder gone</span>'
         : s.starting ? startingBtn : `<button class="sumbtn rs-btn" type="button" data-resume="${esc(s.id)}">${ic('play')}<span>Resume</span></button>`}
     </div>`;
 }
@@ -955,11 +964,17 @@ const startingBtn = `<button class="sumbtn rs-btn" type="button" disabled>${ic('
 // Ending is for good, so it takes a second press (see the click handler).
 let armed = ''; // the session whose End button waits for its second press
 // A session running in the background has no window: this opens it in a terminal tab on its computer.
-const attachBtn = s => s.background ? `<button class="sumbtn rs-btn" type="button" data-attach="${esc(s.id)}">${ic('terminal')}<span>Open in terminal</span></button>` : '';
+const attachBtn = s => s.background ? `<button type="button" data-attach="${esc(s.id)}">${ic('terminal')}<span>Open in terminal</span></button>` : '';
 // A session in a terminal, moved to the background (asks once more if it's working: that work stops).
-const bgBtn = s => s.id && !s.background && s.state && s.state !== 'closed' ? `<button class="sumbtn rs-btn" type="button" data-tobg="${esc(s.id)}">${ic('arrow-down-to-line')}<span>Send to background</span></button>` : '';
-const endBtn = s => `<button class="sumbtn rs-btn end-btn${armed === s.id ? ' arm' : ''}" type="button" data-end="${esc(s.id)}">${ic('square')}<span>${
+const bgBtn = s => s.id && !s.background && s.state && s.state !== 'closed' ? `<button type="button" data-tobg="${esc(s.id)}">${ic('arrow-down-to-line')}<span>Send to background</span></button>` : '';
+const endBtn = s => `<button class="end-btn${armed === s.id ? ' arm' : ''}" type="button" data-end="${esc(s.id)}">${ic('square')}<span>${
   armed !== s.id ? 'End session' : s.state === 'working' ? "It's working. End anyway?" : 'End it for good?'}</span></button>`;
+// Haiku keeps a session's progress summary up to date; this stops that for one session (and starts it again).
+const pauseBtn = s => s.id ? `<button type="button" data-sumpause="${esc(s.id)}" data-on="${s.paused ? 1 : 0}">${ic(s.paused ? 'play' : 'pause')}<span>${s.paused ? 'Resume summaries' : 'Pause summaries'}</span></button>` : '';
+// Everything you can do with a running session, behind one ... button.
+let menuOpen = ''; // the session whose menu is open
+const menuBtn = s => `<span class="menu-wrap"><button class="sumbtn rs-btn menu-btn" type="button" data-menu="${esc(s.id)}" aria-label="More" aria-expanded="${menuOpen === s.id}">${ic('ellipsis')}</button>${
+  menuOpen === s.id ? `<div class="menu">${attachBtn(s)}${bgBtn(s)}${pauseBtn(s)}${endBtn(s)}</div>` : ''}</span>`;
 // The transfer's status file: running, startedAt, finishedAt, result (ok, partial, error), counts, errors, error.
 function syncCard(sy) {
   if (!sy) return '';
@@ -1064,6 +1079,16 @@ document.addEventListener('click', e => {
     return refresh();
   }
   if (e.target.closest('[data-earlier]')) { limit += 6; return refresh(); }
+  const mnb = e.target.closest('[data-menu]');
+  if (mnb) { menuOpen = menuOpen === mnb.dataset.menu ? '' : mnb.dataset.menu; armed = ''; return refresh(); }
+  const inMenu = e.target.closest('.menu');
+  if (menuOpen && !inMenu) { menuOpen = ''; armed = ''; refresh(); }
+  if (inMenu && !e.target.closest('[data-end]')) menuOpen = '';      // a choice closes it (End asks first)
+  const pz = e.target.closest('[data-sumpause]');
+  if (pz) {
+    const on = pz.dataset.on === '1';
+    return post('/api/summaries' + q(), { id: pz.dataset.sumpause, on }).then(r => { toast(!r.ok ? r.error : on ? 'Summaries back on for this session' : 'Summaries paused for this session'); refresh(); });
+  }
   const pj = e.target.closest('[data-project]');
   if (pj) { const k = pj.dataset.project; openProjects.has(k) ? openProjects.delete(k) : openProjects.add(k); return refresh(); }
   if (e.target.closest('[data-mkopen]')) return openMk();

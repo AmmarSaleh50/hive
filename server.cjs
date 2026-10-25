@@ -421,6 +421,17 @@ function runHaiku(name, system, input, label, done) {
 }
 
 function saveCache() { fs.writeFile(CACHE, JSON.stringify(cache), () => {}); }
+// Sessions whose Haiku summaries you paused (from the session's ... menu). Kept in data/paused.json across restarts.
+const PAUSED = path.join(DATA, 'paused.json');
+let paused = new Set();
+try { paused = new Set(JSON.parse(fs.readFileSync(PAUSED, 'utf8'))); } catch {}
+function setSummaries(id, on) {
+  if (!/^[\w-]+$/.test(id) || !sessions.has(id)) return 'That session is not on the board.';
+  if (on) paused.delete(id); else paused.add(id);
+  fs.writeFile(PAUSED, JSON.stringify([...paused]), () => {});
+  bump();
+  return '';
+}
 
 const ORDER = { done: 0, now: 1, todo: 2 }; // the comb fills left to right
 
@@ -540,7 +551,7 @@ function scheduleSummaries() {
   let running = [...sessions.values()].filter(s => s.summarizing).length;
   for (const s of sessions.values()) {
     if (running >= 2) break;
-    if (!s.running || !s.msgs.length || s.summarizing) continue;
+    if (!s.running || !s.msgs.length || s.summarizing || paused.has(s.id)) continue;
     const gap = clients.size || s.stateChanged ? SUMMARY_GAP : BACKGROUND_GAP;
     const stale = s.dirty || !s.prog || (s.prog.at || 0) < s.lastAt;
     if (stale && Date.now() - s.lastRun > gap) { summarize(s); running++; }
@@ -548,6 +559,7 @@ function scheduleSummaries() {
   // Spare capacity goes to earlier jobs that never got a briefing or an icon, one call at a time.
   if (running + backfilling >= 2 || backfilling) return;
   for (const s of sessions.values()) {
+    if (paused.has(s.id)) continue;
     const hs = (s.prog && s.prog.history) || [];
     const i = hs.findIndex(h => !h.brief);
     if (i >= 0 && s.msgs.length) return backfill(s, i);
@@ -580,7 +592,7 @@ function summary(s) {
   const state = !s.running ? 'closed' : s.status === 'waiting' ? 'waiting' : s.status === 'idle' ? (needsYou(s) ? 'waiting' : 'finished') : 'working';
   return { id: s.id, name: displayName(s), project: s.cwd ? path.basename(s.cwd) : '', cwd: s.cwd, state, background: s.kind === 'background',
     startedAt: s.startedAt, endedAt: s.endedAt, lastAt: s.lastAt, stateSince: s.stateSince || s.lastAt, progress, tasks: tasks || [], last,
-    starting: !s.running && isStarting(s.id), activity: state === 'closed' || state === 'finished' ? null : quietWork(s) };
+    starting: !s.running && isStarting(s.id), paused: paused.has(s.id), activity: state === 'closed' || state === 'finished' ? null : quietWork(s) };
 }
 
 // A message is a turn's result when it's Claude's last word before your next prompt, or before the
@@ -1249,7 +1261,7 @@ async function viaPeer(req, res, u, p, mode) {
     return json(res, mode ? await (await toPeer(p, '/api/search?q=' + encodeURIComponent(u.searchParams.get('q') || ''))).json() : { ready: true, results: [] });
   } else if (u.pathname === '/api/folders') {
     return json(res, mode ? await (await toPeer(p, '/api/folders')).json() : { workspace: '', folders: [] });
-  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach', '/api/background'].includes(u.pathname)) {
+  } else if (['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach', '/api/background', '/api/summaries'].includes(u.pathname)) {
     const body = await readBody(req), r = await toPeer(p, u.pathname, body);
     return json(res, r.ok ? await r.json() : { ok: false, error: `The ${p.name}'s Hive refused that (${r.status}).` });
   } else { res.writeHead(404); return res.end(); }
@@ -1274,7 +1286,7 @@ function handle(req, res) {
     return res.end('{"ok":true}');
   }
   const mode = launchMode(req);
-  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach', '/api/background'].includes(u.pathname);
+  const LAUNCH = ['/api/resume', '/api/end', '/api/routine', '/api/sync', '/api/new', '/api/mkdir', '/api/attach', '/api/background', '/api/summaries'].includes(u.pathname);
   if (LAUNCH) {
     // Only a JSON POST with our own header: browsers can't send that from another website without asking first.
     const origin = req.headers.origin ? new URL(req.headers.origin).host : req.headers.host;
@@ -1302,6 +1314,7 @@ function handle(req, res) {
     return readBody(req).then(async body => {
       if (u.pathname === '/api/resume') { const err = await resumeSession(String(body.id || ''), mode); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/background') { const err = await toBackground(String(body.id || '')); return json(res, { ok: !err, error: err }); }
+      if (u.pathname === '/api/summaries') { const err = setSummaries(String(body.id || ''), !!body.on); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/attach') { const err = attachSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/end') { const err = await endSession(String(body.id || '')); return json(res, { ok: !err, error: err }); }
       if (u.pathname === '/api/sync') { const err = runSync(); return json(res, { ok: !err, error: err }); }

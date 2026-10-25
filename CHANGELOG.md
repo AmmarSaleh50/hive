@@ -3,6 +3,13 @@
 All notable changes to Hive are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.0 (2026-10-25)
+
+### Added
+
+- **A ... menu for each running session**, on its page and in Folders: Open in terminal, Send to background, End session, and the new Pause summaries.
+- **Pause summaries for one session** (and resume them): Haiku stops updating that session's progress. Kept across restarts (data/paused.json); the session page says "summaries paused".
+
 ## 0.6.5 (2026-10-25)
 
 ### Fixed

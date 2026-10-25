@@ -126,6 +126,11 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     check(JSON.parse((await post('/api/resume', { id: 'branchy' })).body).error === 'That session is already running.', 'a running session is not opened twice');
     check(JSON.parse((await post('/api/resume', { id: 'moved-away' })).body).error === 'That session is already running.', 'resuming a moved session goes to where it lives now');
     check(JSON.parse((await post('/api/resume', { id: 'nope' })).body).ok === false, 'only listed sessions can be resumed');
+    const pz = JSON.parse((await post('/api/summaries', { id: 'branchy', on: false })).body);
+    const isPaused = async () => JSON.parse((await get('/api/state')).body).sessions.find(s => s.id === 'branchy').paused;
+    check(pz.ok && await isPaused() === true, 'summaries can be paused for one session');
+    await post('/api/summaries', { id: 'branchy', on: true });
+    check(await isPaused() === false && JSON.parse((await post('/api/summaries', { id: 'nope', on: false })).body).ok === false, '...and resumed, only for sessions on the board');
 
     // Folders: every folder in the workspace, sessions elsewhere under "other"; new folders by name only.
     const fl = JSON.parse((await get('/api/folders')).body);
